@@ -1,4 +1,110 @@
 const socket = io();
+// Modify the forceGameState handler to properly handle player activation
+socket.on("forceGameState", (data) => {
+  if (data.roomCode) {
+    currentRoom = data.roomCode;
+    updateRoomCodeDisplay();
+  }
+  // Hide all modals
+  Object.values(modals).forEach(modal => {
+    modal.style.display = "none";
+  });
+  
+  // Initialize game state
+  grid = data.grid;
+  players = data.players.reduce((acc, player) => {
+    acc[player.id] = player;
+    return acc;
+  }, {});
+  
+  // Set game active status based on both canPlay and isSpectator
+  gameActive = data.canPlay || false;
+  
+  // Update UI
+  document.getElementById("gameContainer").style.display = "block";
+  
+  if (data.isSpectator) {
+    document.getElementById("waitOverlay").style.display = "flex";
+    document.querySelector("#waitOverlay .wait-message").textContent = 
+      data.message || "You joined mid-game. Waiting for next round...";
+    canvas.classList.add("spectator");
+  } else {
+    document.getElementById("waitOverlay").style.display = "none";
+    canvas.classList.remove("spectator");
+  }
+  
+  // Initialize game view
+  const container = document.getElementById('gameContainer');
+  canvas.width = container.clientWidth - 20;
+  canvas.height = container.clientHeight - 20;
+  autoScaleGrid();
+  updateScoreboard();
+});
+// Connection handling (add this right after socket initialization)
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+socket.on("connect", () => {
+  reconnectAttempts = 0;
+  
+  if (currentRoom && myNickname) {
+      // Try to rejoin with existing credentials
+      socket.emit("requestRejoin");
+      
+      // Also update UI
+      document.getElementById("waitOverlay").style.display = "flex";
+      document.querySelector("#waitOverlay .wait-message").textContent = 
+          "Reconnecting to game...";
+  }
+});
+
+socket.on("disconnect", () => {
+  if (gameActive) {
+      document.getElementById("waitOverlay").style.display = "flex";
+      document.querySelector("#waitOverlay .wait-message").textContent = 
+          "Connection lost. Reconnecting...";
+  }
+});
+
+socket.on("reconnect_attempt", (attempt) => {
+  reconnectAttempts++;
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+      alert("Failed to reconnect. Please refresh the page.");
+      window.location.reload();
+  } else {
+      document.querySelector("#waitOverlay .wait-message").textContent = 
+          `Reconnecting... (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+  }
+});
+
+document.addEventListener('selectstart', function(e) {
+  if (gameActive) {
+    e.preventDefault();
+    return false;
+  }
+});
+
+// Additional protection for drag operations
+document.addEventListener('mousedown', function(e) {
+  if (gameActive && e.target.closest('#gameHeader')) {
+    e.preventDefault();
+  }
+}, { passive: false });
+// Should be right after socket.io initialization
+document.addEventListener(
+  "touchstart",
+  function (e) {
+    if (e.target === canvas) e.preventDefault();
+  },
+  { passive: false }
+);
+document.addEventListener(
+  "touchmove",
+  function (e) {
+    if (e.target === canvas) e.preventDefault();
+  },
+  { passive: false }
+);
 let myNickname = "";
 let currentRoom = "";
 let isHost = false;
@@ -25,14 +131,14 @@ let offsetX = 0;
 let offsetY = 0;
 const margin = 50;
 const selection = {
-    isActive: false,
-    startX: 0,
-    startY: 0,
-    currentX: 0,
-    currentY: 0,
-    isValid: false,
-    highlightedCells: []
-  };
+  isActive: false,
+  startX: 0,
+  startY: 0,
+  currentX: 0,
+  currentY: 0,
+  isValid: false,
+  highlightedCells: [],
+};
 // Animation
 let removingApples = [];
 let remoteCursors = {};
@@ -46,18 +152,30 @@ const bgmOIA = new Audio("oia.m4a");
 const bgmChill = new Audio("chill.m4a");
 const bgmAnime = new Audio("anime.m4a");
 const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
-
+const availableColors = [
+  "#FF0000",
+  "#FF9900",
+  "#FFFF00",
+  "#00FF00",
+  "#00FFFF",
+  "#FF00FF",
+  "#FFFFFF",
+  "#FFD700",
+  "#00BFFF",
+  "#8A2BE2",
+];
+const playerColors = {};
 // Modals
 const modals = {
   initial: document.getElementById("initialModal"),
   create: document.getElementById("createRoomModal"),
   join: document.getElementById("joinRoomModal"),
   lobby: document.getElementById("lobbyModal"),
-  gameOver: document.getElementById("gameOverModal")
+  gameOver: document.getElementById("gameOverModal"),
 };
 
 // Initialize sound
-bgmTracks.forEach(track => {
+bgmTracks.forEach((track) => {
   track.loop = true;
   track.volume = parseFloat(document.getElementById("bgmVolume").value);
 });
@@ -70,16 +188,15 @@ document.getElementById("createRoomBtn").addEventListener("click", () => {
 
 document.getElementById("confirmCreateRoom").addEventListener("click", () => {
   const nickname = document.getElementById("createNickname").value.trim();
-  const maxPlayers = parseInt(document.getElementById("maxPlayers").value);
-  if (!nickname || maxPlayers < 1 || maxPlayers > 5) {
-    alert("Please enter a valid nickname and player count (1-5)");
+  if (!nickname) {
+    alert("Please enter a valid nickname");
     return;
   }
-  
-  myNickname = nickname;
-  socket.emit("createRoom", { maxPlayers, nickname });
-});
 
+  myNickname = nickname;
+  // Always set maxPlayers to 10
+  socket.emit("createRoom", { nickname });
+});
 document.getElementById("joinExistingBtn").addEventListener("click", () => {
   modals.initial.style.display = "none";
   modals.join.style.display = "flex";
@@ -87,26 +204,42 @@ document.getElementById("joinExistingBtn").addEventListener("click", () => {
 
 document.getElementById("confirmJoinRoom").addEventListener("click", () => {
   const nickname = document.getElementById("joinNickname").value.trim();
-  const roomCode = document.getElementById("joinRoomCode").value.trim().toUpperCase();
-  
+  const roomCode = document
+    .getElementById("joinRoomCode")
+    .value.trim()
+    .toUpperCase();
+
   if (!nickname || !roomCode) {
     alert("Please enter both nickname and room code");
     return;
   }
-  
+
   myNickname = nickname;
   socket.emit("joinRoom", { roomCode, nickname });
   modals.join.style.display = "none";
 });
 
 socket.on("roomJoined", ({ roomCode, players }) => {
-    currentRoom = roomCode;
-    isHost = false;
-    roomCodeDisplayElem.textContent = roomCode;
-    updateRoomCodeDisplay();
-  document.getElementById("roomCodeDisplay").textContent = roomCode;
+  currentRoom = roomCode;
+  isHost = false;
+  roomCodeDisplayElem.textContent = roomCode;
+  updateRoomCodeDisplay();
   modals.lobby.style.display = "flex";
   updatePlayerList(players);
+
+  // Hide the Start Game button for non-hosts.
+  const startBtn = document.getElementById("startGameBtn");
+  startBtn.style.display = "none";
+
+  // If there is no waiting message already, add one.
+  if (!document.getElementById("waitingMessage")) {
+    const waitingMsg = document.createElement("p");
+    waitingMsg.id = "waitingMessage";
+    waitingMsg.style.fontSize = "1.2rem";
+    waitingMsg.style.marginTop = "10px";
+    waitingMsg.textContent = "Waiting for host to start the game...";
+    modals.lobby.querySelector(".modal-content").appendChild(waitingMsg);
+  }
 });
 
 document.getElementById("startGameBtn").addEventListener("click", () => {
@@ -128,7 +261,7 @@ document.getElementById("bgmToggleAnime").addEventListener("change", (e) => {
 });
 document.getElementById("bgmVolume").addEventListener("input", (e) => {
   const vol = parseFloat(e.target.value);
-  bgmTracks.forEach(track => track.volume = vol);
+  bgmTracks.forEach((track) => (track.volume = vol));
 });
 document.getElementById("popVolume").addEventListener("input", (e) => {
   popSound.volume = parseFloat(e.target.value);
@@ -136,14 +269,20 @@ document.getElementById("popVolume").addEventListener("input", (e) => {
 
 // Socket event handlers
 socket.on("roomCreated", ({ roomCode, players }) => {
-    currentRoom = roomCode;
-    isHost = true;
-    roomCodeDisplayElem.textContent = roomCode;
-    updateRoomCodeDisplay();
-  document.getElementById("roomCodeDisplay").textContent = roomCode;
+  currentRoom = roomCode;
+  isHost = true;
+  roomCodeDisplayElem.textContent = roomCode;
+  updateRoomCodeDisplay();
   modals.create.style.display = "none";
   modals.lobby.style.display = "flex";
   updatePlayerList(players);
+
+  // Show start button and remove waiting message if it exists.
+  const startBtn = document.getElementById("startGameBtn");
+  startBtn.disabled = false;
+  startBtn.style.display = "inline-block";
+  const waitingMsg = document.getElementById("waitingMessage");
+  if (waitingMsg) waitingMsg.remove();
 });
 
 socket.on("playerJoined", (players) => {
@@ -152,26 +291,48 @@ socket.on("playerJoined", (players) => {
     document.getElementById("startGameBtn").disabled = players.length < 1;
   }
 });
-
-socket.on("gameStarted", (gameState) => {
-    gameActive = true;
-    resetSelection(); // Add this line
-  modals.lobby.style.display = "none";
-  
-document.getElementById("gameInfo").style.display = "flex";
-document.getElementById("gameInfo").style.justifyContent = "space-between";
-
-  document.getElementById("gameContainer").style.display = "block";
-  document.getElementById("waitOverlay").style.display = "none";
-  canvas.classList.remove("spectator");
-  initializeGame(gameState);
+socket.on("playerLeft", (players) => {
+  updatePlayerList(players);
 });
+// Client-side (client.js)
+socket.on("gameStarted", (gameState) => {
+  // Check if current player is in the players list
+  const isPlayer = gameState.players.some(p => p.id === socket.id);
+  gameActive = isPlayer;
+  
+  if (isPlayer) {
+    // Player can interact
+    document.getElementById("waitOverlay").style.display = "none";
+    canvas.classList.remove("spectator");
+  } else {
+    // Spectator view
+    document.getElementById("waitOverlay").style.display = "flex";
+    document.querySelector("#waitOverlay .wait-message").textContent = 
+      "Wait for the next game to start...";
+    canvas.classList.add("spectator");
+  }
 
+  // Update game state
+  grid = gameState.grid;
+  players = gameState.players.reduce((acc, player) => {
+    acc[player.id] = player;
+    return acc;
+  }, {});
+
+  // Update UI
+  updateScoreboard();
+  autoScaleGrid();
+});
 socket.on("spectatorJoined", (gameState) => {
   gameActive = false;
-  document.getElementById("waitOverlay").style.display = "flex";
-  canvas.classList.add("spectator");
   initializeGame(gameState);
+  
+  // Ensure all modals are hidden
+  Object.values(modals).forEach(modal => {
+      modal.style.display = "none";
+  });
+  
+  document.getElementById("gameContainer").style.display = "block";
 });
 
 socket.on("gameState", (data) => {
@@ -185,23 +346,23 @@ socket.on("gameState", (data) => {
 });
 
 socket.on("selectionSuccess", (data) => {
-    const { removed, playerId, newScore } = data;
-    players[playerId].score = newScore;
-    if (playerId === socket.id) {
-      myScore = newScore;
-      myScoreElem.textContent = myScore;
-      // Only play sound for local player
-      popSound.currentTime = 0;
-      popSound.play();
+  const { removed, playerId, newScore } = data;
+  players[playerId].score = newScore;
+  if (playerId === socket.id) {
+    myScore = newScore;
+    myScoreElem.textContent = `Your Score: ${myScore}`;
+    // Only play sound for local player
+    popSound.currentTime = 0;
+    popSound.play();
   }
-  
+
   removed.forEach(({ row, col }) => {
     let oldValue = grid[row][col];
     if (oldValue < 1) oldValue = 1;
     let dir = Math.random() < 0.5 ? -1 : 1;
     let randomArcPeak = 100 + Math.random() * 100;
     let randomArcSide = 80 + Math.random() * 40;
-    
+
     removingApples.push({
       row,
       col,
@@ -210,90 +371,100 @@ socket.on("selectionSuccess", (data) => {
       duration: 600,
       arcPeak: randomArcPeak,
       arcSide: randomArcSide,
-      direction: dir
+      direction: dir,
     });
     grid[row][col] = 0;
   });
-  
+
   updateScoreboard();
 });
 
 socket.on("selectionFail", (data) => {
-  console.log("Selection failed:", data.reason);
+  // console.log("Selection failed:", data.reason);
 });
 
 socket.on("timerUpdate", (data) => {
-  timeLeftElem.textContent = data.timeLeft;
+  timeLeftElem.textContent = `Time Left: ${data.timeLeft}s`;
 });
-
 // Update the gameOver handler:
 socket.on("gameOver", (data) => {
-    gameActive = false;  // Changed from true to false
-    resetSelection(); // Add this line
-    const finalScoreElem = document.getElementById("finalScore");
-    finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${data.winner} (${data.score})`;
-    
-    // Show the modal
-    modals.gameOver.style.display = "flex";
-    
-    // Ensure buttons exist
-    const gameOverModalContent = document.querySelector("#gameOverModal .modal-content");
-    if (!document.getElementById("playAgainBtn")) {
-      const playAgainBtn = document.createElement("button");
-      playAgainBtn.id = "playAgainBtn";
-      playAgainBtn.textContent = "Play Again";
-      playAgainBtn.className = "modal-btn";
-      playAgainBtn.addEventListener("click", () => {
-        if (isHost) {
-          socket.emit("startGame");
-        }
-        modals.gameOver.style.display = "none";
-      });
-      
-      const quitBtn = document.createElement("button");
-      quitBtn.id = "quitBtn";
-      quitBtn.textContent = "Quit";
-      quitBtn.className = "modal-btn";
-      quitBtn.addEventListener("click", () => {
-        socket.emit("quitRoom");
-        window.location.reload();
-      });
-      
-      // Remove existing close button
-      const closeBtn = document.getElementById("closeModal");
-      if (closeBtn) closeBtn.remove();
-      
-      // Add new buttons
-      gameOverModalContent.appendChild(playAgainBtn);
-      gameOverModalContent.appendChild(quitBtn);
-    }
-  });
-socket.on("hostDisconnected", () => {
-    alert("The host has left the game. You will be returned to the main menu.");
+  gameActive = false;
+  resetSelection();
+  const finalScoreElem = document.getElementById("finalScore");
+  finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${data.winner} (${data.score})`;
+
+  // Show the game over modal
+  modals.gameOver.style.display = "flex";
+
+  const gameOverModalContent = document.querySelector(
+    "#gameOverModal .modal-content"
+  );
+
+  // Remove any existing buttons to avoid duplicates
+  const existingPlayAgain = document.getElementById("playAgainBtn");
+  if (existingPlayAgain) existingPlayAgain.remove();
+  const existingQuit = document.getElementById("quitBtn");
+  if (existingQuit) existingQuit.remove();
+
+  // Only add the "Play Again" button if this client is the host
+  if (isHost) {
+    const playAgainBtn = document.createElement("button");
+    playAgainBtn.id = "playAgainBtn";
+    playAgainBtn.textContent = "Play Again";
+    playAgainBtn.className = "modal-btn";
+    playAgainBtn.addEventListener("click", () => {
+      socket.emit("startGame");
+      modals.gameOver.style.display = "none";
+    });
+    gameOverModalContent.appendChild(playAgainBtn);
+  }
+
+  // Add the "Quit" button for all players
+  const quitBtn = document.createElement("button");
+  quitBtn.id = "quitBtn";
+  quitBtn.textContent = "Quit";
+  quitBtn.className = "modal-btn";
+  quitBtn.addEventListener("click", () => {
+    socket.emit("quitRoom");
     window.location.reload();
   });
+  gameOverModalContent.appendChild(quitBtn);
+});
+socket.on("hostDisconnected", () => {
+  alert("The host has left the game. You will be returned to the main menu.");
+  window.location.reload();
+});
+socket.on("gameReset", () => {
+  // Only request rejoin if we're already in a game
+  if (gameActive) {
+    socket.emit("requestRejoin");
+  }
+});
 // Reset button functionality
 resetButton.addEventListener("click", () => {
-    if (isHost) {
-      socket.emit("startGame");
-    }
-  });
-  
-  // Update the room code display position
-  function updateRoomCodeDisplay() {
-    const gameInfo = document.getElementById("gameInfo");
-    const roomCodeSpan = document.createElement("span");
-    roomCodeSpan.id = "roomCodeDisplayInGame";
-    roomCodeSpan.textContent = currentRoom;
-    roomCodeSpan.style.margin = "0 auto";
-    
-    // Clear any existing room code display
-    const existing = document.getElementById("roomCodeDisplayInGame");
-    if (existing) existing.remove();
-    
-    gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
+  if (isHost) {
+    socket.emit("startGame");
+  } else {
+    // For non-hosts, request current game state
+    socket.emit("requestRejoin");
   }
-  
+});
+
+// Update the room code display position
+function updateRoomCodeDisplay() {
+  const gameInfo = document.getElementById("gameInfo");
+  const roomCodeSpan = document.createElement("span");
+  roomCodeSpan.id = "roomCodeDisplayInGame";
+  roomCodeSpan.textContent = currentRoom;
+  roomCodeSpan.style.margin = "0 auto";
+
+  // Clear any existing room code display
+  const existing = document.getElementById("roomCodeDisplayInGame");
+  if (existing) existing.remove();
+
+  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
+}
+
 socket.on("updateCursor", (data) => {
   remoteCursors[data.playerId] = data;
 });
@@ -309,16 +480,17 @@ socket.on("roomError", (message) => {
 // Game functions
 function autoScaleGrid() {
   if (!grid || grid.length === 0) return;
-  
+
   const rows = grid.length;
   const cols = grid[0].length;
+
   const availableWidth = canvas.width - margin * 2;
   const availableHeight = canvas.height - margin * 2;
-  
+
   const scaleX = Math.floor(availableWidth / cols);
   const scaleY = Math.floor(availableHeight / rows);
   cellSize = Math.min(scaleX, scaleY);
-  
+
   const gridWidth = cols * cellSize;
   const gridHeight = rows * cellSize;
   offsetX = margin + (availableWidth - gridWidth) / 2;
@@ -328,7 +500,8 @@ function autoScaleGrid() {
 function updateScoreboard() {
   let html = "<h3>Scoreboard</h3><ul>";
   for (let pid in players) {
-    let name = players[pid].nickname || (playerNames[pid] || ("Player " + nextPlayerNumber));
+    let name =
+      players[pid].nickname || playerNames[pid] || "Player " + nextPlayerNumber;
     if (!playerNames[pid] && !players[pid].nickname) {
       playerNames[pid] = "Player " + nextPlayerNumber;
       nextPlayerNumber++;
@@ -343,91 +516,111 @@ function updateScoreboard() {
 }
 
 function getPlayerColor(playerId) {
-  const colors = ["#FF0000","#FF9900","#FFFF00","#00FF00","#00FFFF","#FF00FF","#FFFFFF","#FFD700"];
-  let hash = 0;
-  for (let i = 0; i < playerId.length; i++) {
-    hash = playerId.charCodeAt(i) + ((hash << 5) - hash);
+  // Return assigned color if it already exists.
+  if (playerColors[playerId]) {
+    return playerColors[playerId];
   }
-  return colors[Math.abs(hash) % colors.length];
+  // Find a color that is not already used.
+  for (let color of availableColors) {
+    if (!Object.values(playerColors).includes(color)) {
+      playerColors[playerId] = color;
+      return color;
+    }
+  }
+  // Fallback if all colors are taken (should rarely happen with 10 colors)
+  playerColors[playerId] = availableColors[0];
+  return availableColors[0];
 }
 
 function drawGame() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    if (!grid || grid.length === 0) {
-      requestAnimationFrame(drawGame);
-      return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!grid || grid.length === 0) {
+    requestAnimationFrame(drawGame);
+    return;
+  }
+
+  const rows = grid.length;
+  const cols = grid[0].length;
+
+  // Draw grid
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      let x = offsetX + c * cellSize;
+      let y = offsetY + r * cellSize;
+      ctx.strokeStyle = "#b2e6be";
+      ctx.strokeRect(x, y, cellSize, cellSize);
     }
-    
-    const rows = grid.length;
-    const cols = grid[0].length;
-    
-    // Draw grid
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+  }
+
+  // Draw apples
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (
+        grid[r][c] > 0 &&
+        !removingApples.some((a) => a.row === r && a.col === c)
+      ) {
         let x = offsetX + c * cellSize;
         let y = offsetY + r * cellSize;
-        ctx.strokeStyle = "#b2e6be";
-        ctx.strokeRect(x, y, cellSize, cellSize);
+        drawApple(x, y, grid[r][c], 1.0, 1.0);
       }
     }
-    
-    // Draw apples
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (grid[r][c] > 0 && !removingApples.some(a => a.row === r && a.col === c)) {
-          let x = offsetX + c * cellSize;
-          let y = offsetY + r * cellSize;
-          drawApple(x, y, grid[r][c], 1.0, 1.0);
-        }
-      }
-    }
-    
-    // Draw animations
-    drawDroppedApples();
-    
-    // Draw selection (new system only)
-    drawSelection();
-    
-    // Draw remote cursors
-    for (let pid in remoteCursors) {
-      let data = remoteCursors[pid];
-      const color = getPlayerColor(pid);
-      ctx.save();
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(data.x, data.y, 5, 0, 2 * Math.PI);
-      ctx.fill();
-      if (data.isDragging && data.selection) {
-        let { startX: sX, startY: sY, currentX: cX, currentY: cY } = data.selection;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(Math.min(sX, cX), Math.min(sY, cY), Math.abs(sX - cX), Math.abs(sY - cY));
-      }
-      ctx.restore();
-    }
-    
-    requestAnimationFrame(drawGame);
   }
+
+  // Draw animations
+  drawDroppedApples();
+
+  // Draw selection (new system only)
+  drawSelection();
+
+  // Draw remote cursors
+  for (let pid in remoteCursors) {
+    let data = remoteCursors[pid];
+    const color = getPlayerColor(pid);
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(data.x, data.y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+    if (data.isDragging && data.selection) {
+      let {
+        startX: sX,
+        startY: sY,
+        currentX: cX,
+        currentY: cY,
+      } = data.selection;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        Math.min(sX, cX),
+        Math.min(sY, cY),
+        Math.abs(sX - cX),
+        Math.abs(sY - cY)
+      );
+    }
+    ctx.restore();
+  }
+
+  requestAnimationFrame(drawGame);
+}
 function drawApple(x, y, value, alpha, scale) {
   const minRadius = 1;
   const radius = Math.max(minRadius, (cellSize / 2 - 5) * scale);
-  
+
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.fillStyle = "red";
   ctx.beginPath();
   ctx.arc(x + cellSize / 2, y + cellSize / 2, radius, 0, 2 * Math.PI);
   ctx.fill();
-  
+
   ctx.fillStyle = "white";
-  ctx.font = `bold ${Math.floor(30 * scale)}px Arial`;
+  ctx.font = `bold ${Math.floor(cellSize * 0.5)}px Arial`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(value, x + cellSize / 2, y + cellSize / 2);
   ctx.restore();
 }
-
 
 function drawDroppedApples() {
   const now = performance.now();
@@ -438,190 +631,367 @@ function drawDroppedApples() {
       removingApples.splice(i, 1);
       continue;
     }
-    
+
     let progress = elapsed / apple.duration;
     let origX = offsetX + apple.col * cellSize;
     let origY = offsetY + apple.row * cellSize;
     let sideOffset = apple.arcSide * apple.direction * progress;
     let x = origX + sideOffset;
     let y;
-    
+
     if (progress <= 0.5) {
       let p = progress / 0.5;
       y = origY - apple.arcPeak * (1 - Math.pow(1 - p, 3));
     } else {
       let p = (progress - 0.5) / 0.5;
-      y = (origY - apple.arcPeak) + Math.pow(p, 3) * (canvas.height + 50 - (origY - apple.arcPeak));
+      y =
+        origY -
+        apple.arcPeak +
+        Math.pow(p, 3) * (canvas.height + 50 - (origY - apple.arcPeak));
     }
-    
+
     drawApple(x, y, apple.value, 1.0 - progress, 1.0 - progress * 0.5);
   }
 }
 
-
 function updatePlayerList(players) {
   const list = document.getElementById("playerList");
   list.innerHTML = players
-    .map(player => `<li>${player.nickname} ${player.id === socket.id ? '(you)' : ''}</li>`)
-    .join('');
+    .map(
+      (player) =>
+        `<li>${player.nickname} ${player.id === socket.id ? "(you)" : ""}</li>`
+    )
+    .join("");
 }
-
 function initializeGame(gameState) {
   grid = gameState.grid;
   players = gameState.players.reduce((acc, player) => {
-    acc[player.id] = player;
-    return acc;
+      acc[player.id] = player;
+      return acc;
   }, {});
+
+  // Reset UI state
+  modals.initial.style.display = "none";
+  modals.lobby.style.display = "none";
+  modals.gameOver.style.display = "none";
   
-  // Set canvas size
-  canvas.width = 1200;
-  canvas.height = 1000;
+  // Responsive canvas sizing
+  const container = document.getElementById('gameContainer');
+  canvas.width = container.clientWidth - 20;
+  canvas.height = container.clientHeight - 20;
   
   autoScaleGrid();
   updateScoreboard();
+  
+  // Show appropriate UI based on player status
+  document.getElementById("gameContainer").style.display = "block";
+  if (gameActive) {
+      document.getElementById("waitOverlay").style.display = "none";
+      canvas.classList.remove("spectator");
+  } else {
+      document.getElementById("waitOverlay").style.display = "flex";
+      canvas.classList.add("spectator");
+  }
+}
+function handleResize() {
+  if (grid && grid.length > 0) {
+    const container = document.getElementById("gameContainer");
+    canvas.width = container.clientWidth - 20;
+    canvas.height = container.clientHeight - 20;
+    autoScaleGrid();
+  }
 }
 
-  
+// Convert touch events to mouse events:
+canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+canvas.addEventListener("touchend", handleTouchEnd);
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  selection.isActive = true;
+  selection.startX = (touch.clientX - rect.left) * scaleX;
+  selection.startY = (touch.clientY - rect.top) * scaleY;
+  selection.currentX = selection.startX;
+  selection.currentY = selection.startY;
+
+  updateSelectionValidity();
+  sendCursorUpdate();
+}
+
+function handleTouchMove(e) {
+  if (!gameActive || !selection.isActive) return;
+  e.preventDefault();
+
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  selection.currentX = (touch.clientX - rect.left) * scaleX;
+  selection.currentY = (touch.clientY - rect.top) * scaleY;
+
+  updateSelectionValidity();
+  sendCursorUpdate();
+}
+
+function handleTouchEnd(e) {
+  if (!gameActive || !selection.isActive) return;
+  e.preventDefault();
+
+  if (selection.isValid) {
+    finalizeSelection();
+  }
+
+  resetSelection();
+  sendCursorUpdate();
+}
+
 // Mouse event handlers
 canvas.addEventListener("mousedown", (e) => {
-    if (!gameActive) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    selection.isActive = true;
-    selection.startX = e.clientX - rect.left;
-    selection.startY = e.clientY - rect.top;
-    selection.currentX = selection.startX;
-    selection.currentY = selection.startY;
-    
-    updateSelectionValidity();
-    sendCursorUpdate();
-  });
-  canvas.addEventListener("mousemove", (e) => {
-    if (!gameActive || !selection.isActive) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    selection.currentX = e.clientX - rect.left;
-    selection.currentY = e.clientY - rect.top;
-    
-    updateSelectionValidity();
-    sendCursorUpdate();
-  });
-  
-  window.addEventListener("mouseup", () => {
-    if (!gameActive || !selection.isActive) return;
-    
-    if (selection.isValid) {
-      finalizeSelection();
-    }
-    
-    resetSelection();
-    sendCursorUpdate();
-  });
-  function updateSelectionValidity() {
-    const selX = Math.min(selection.startX, selection.currentX);
-    const selY = Math.min(selection.startY, selection.currentY);
-    const selW = Math.abs(selection.startX - selection.currentX);
-    const selH = Math.abs(selection.startY - selection.currentY);
-    
-    let sum = 0;
-    selection.highlightedCells = [];
-    
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[0].length; c++) {
-        const x = offsetX + c * cellSize;
-        const y = offsetY + r * cellSize;
-        
-        // More precise overlap calculation (center-point check)
-        const centerX = x + cellSize/2;
-        const centerY = y + cellSize/2;
-        
-        if (centerX >= selX && centerX <= selX + selW &&
-            centerY >= selY && centerY <= selY + selH) {
-          if (grid[r][c] > 0) {
-            sum += grid[r][c];
-            selection.highlightedCells.push({row: r, col: c});
-          }
+  if (!gameActive) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  selection.isActive = true;
+  selection.startX = (e.clientX - rect.left) * scaleX;
+  selection.startY = (e.clientY - rect.top) * scaleY;
+  selection.currentX = selection.startX;
+  selection.currentY = selection.startY;
+
+  updateSelectionValidity();
+  sendCursorUpdate();
+});
+
+canvas.addEventListener("mousemove", (e) => {
+  if (!gameActive || !selection.isActive) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  selection.currentX = (e.clientX - rect.left) * scaleX;
+  selection.currentY = (e.clientY - rect.top) * scaleY;
+
+  updateSelectionValidity();
+  sendCursorUpdate();
+});
+
+window.addEventListener("mouseup", () => {
+  if (!gameActive || !selection.isActive) return;
+
+  if (selection.isValid) {
+    finalizeSelection();
+  }
+
+  resetSelection();
+  sendCursorUpdate();
+});
+function updateSelectionValidity() {
+  const selX = Math.min(selection.startX, selection.currentX);
+  const selY = Math.min(selection.startY, selection.currentY);
+  const selW = Math.abs(selection.startX - selection.currentX);
+  const selH = Math.abs(selection.startY - selection.currentY);
+
+  let sum = 0;
+  selection.highlightedCells = [];
+
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[0].length; c++) {
+      const x = offsetX + c * cellSize;
+      const y = offsetY + r * cellSize;
+
+      // More precise overlap calculation (center-point check)
+      const centerX = x + cellSize / 2;
+      const centerY = y + cellSize / 2;
+
+      if (
+        centerX >= selX &&
+        centerX <= selX + selW &&
+        centerY >= selY &&
+        centerY <= selY + selH
+      ) {
+        if (grid[r][c] > 0) {
+          sum += grid[r][c];
+          selection.highlightedCells.push({ row: r, col: c });
         }
       }
     }
-    
-    selection.isValid = sum === 10 && selection.highlightedCells.length > 0;
   }
-  
+
+  selection.isValid = sum === 10 && selection.highlightedCells.length > 0;
+}
+function updateScoreboard() {
+  const sortedPlayers = Object.values(players).sort(
+    (a, b) => b.score - a.score
+  );
+
+  let html = `<div class="scoreboard-grid">`;
+
+  sortedPlayers.slice(0, 3).forEach((player, index) => {
+    const color = getPlayerColor(player.id);
+    html += `
+            <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
+                 style="border-color: ${color}">
+                <span class="medal">${["🥇", "🥈", "🥉"][index]}</span>
+                <span class="name" style="color: ${color}">${
+      player.nickname
+    }</span>
+                <span class="score">${player.score}</span>
+            </div>
+        `;
+  });
+
+  if (sortedPlayers.length > 3) {
+    html += `<div class="more-players">+${sortedPlayers.length - 3}</div>`;
+  }
+
+  html += `</div>`;
+  scoreboardDiv.innerHTML = html;
+}
+function createPlayerRow(player, rank) {
+  const isYou = player.id === socket.id;
+  return `
+        <div class="player-row ${isYou ? "you" : ""}">
+            <span class="rank">${rank + 1}.</span>
+            <span class="name">${player.nickname}</span>
+            <span class="score">${player.score}</span>
+            ${isYou ? '<span class="you-badge">YOU</span>' : ""}
+        </div>
+    `;
+}
 function drawSelection() {
-    if (!selection.isActive || !grid.length) return;
-    const selX = Math.min(selection.startX, selection.currentX);
-    const selY = Math.min(selection.startY, selection.currentY);
-    const selW = Math.abs(selection.startX - selection.currentX);
-    const selH = Math.abs(selection.startY - selection.currentY);
-    
-    // Draw selection box
-    ctx.strokeStyle = selection.isValid ? "rgba(0, 200, 0, 0.8)" : "rgba(0, 0, 255, 0.8)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(selX, selY, selW, selH);
-    
-    // Fill selection area
-    ctx.fillStyle = selection.isValid ? "rgba(0, 255, 0, 0.1)" : "rgba(0, 0, 255, 0.1)";
-    ctx.fillRect(selX, selY, selW, selH);
-    
-    // Highlight selected apples
-    selection.highlightedCells.forEach(({row, col}) => {
-      const x = offsetX + col * cellSize;
-      const y = offsetY + row * cellSize;
-      
-      // Draw highlight circle
-      ctx.save();
-      ctx.strokeStyle = selection.isValid ? "rgba(255, 255, 0, 0.8)" : "rgba(255, 165, 0, 0.8)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(
-        x + cellSize / 2,
-        y + cellSize / 2,
-        cellSize / 2 - 2,
-        0,
-        Math.PI * 2
-      );
-      ctx.stroke();
-      ctx.restore();
-    });
+  if (!selection.isActive || !grid.length) return;
+  const selX = Math.min(selection.startX, selection.currentX);
+  const selY = Math.min(selection.startY, selection.currentY);
+  const selW = Math.abs(selection.startX - selection.currentX);
+  const selH = Math.abs(selection.startY - selection.currentY);
+
+  // Draw selection box
+  ctx.strokeStyle = selection.isValid
+    ? "rgba(0, 200, 0, 0.8)"
+    : "rgba(0, 0, 255, 0.8)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(selX, selY, selW, selH);
+
+  // Fill selection area
+  ctx.fillStyle = selection.isValid
+    ? "rgba(0, 255, 0, 0.1)"
+    : "rgba(0, 0, 255, 0.1)";
+  ctx.fillRect(selX, selY, selW, selH);
+
+  // Highlight selected apples
+  selection.highlightedCells.forEach(({ row, col }) => {
+    const x = offsetX + col * cellSize;
+    const y = offsetY + row * cellSize;
+
+    // Draw highlight circle
+    ctx.save();
+    ctx.strokeStyle = selection.isValid
+      ? "rgba(255, 255, 0, 0.8)"
+      : "rgba(255, 165, 0, 0.8)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(
+      x + cellSize / 2,
+      y + cellSize / 2,
+      cellSize / 2 - 2,
+      0,
+      Math.PI * 2
+    );
+    ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function finalizeSelection() {
+  if (selection.isValid) {
+    socket.emit("selectApples", { cells: selection.highlightedCells });
   }
-  
-  function finalizeSelection() {
-    if (selection.isValid) {
-      socket.emit("selectApples", { cells: selection.highlightedCells });
-    }
-  }
-  
-  function resetSelection() {
-    selection.isActive = false;
-    selection.isValid = false;
-    selection.highlightedCells = [];
-  }
-  function sendCursorUpdate() {
-    if (!gameActive) return;
-    
-    socket.emit("playerCursor", {
-      x: selection.currentX,
-      y: selection.currentY,
-      isDragging: selection.isActive,
-      selection: selection.isActive ? {
-        startX: selection.startX,
-        startY: selection.startY,
-        currentX: selection.currentX,
-        currentY: selection.currentY
-      } : null
-    });
-  }
+}
+
+function resetSelection() {
+  selection.isActive = false;
+  selection.isValid = false;
+  selection.highlightedCells = [];
+}
+function sendCursorUpdate() {
+  if (!gameActive) return;
+
+  socket.emit("playerCursor", {
+    x: selection.currentX,
+    y: selection.currentY,
+    isDragging: selection.isActive,
+    selection: selection.isActive
+      ? {
+          startX: selection.startX,
+          startY: selection.startY,
+          currentX: selection.currentX,
+          currentY: selection.currentY,
+        }
+      : null,
+  });
+}
 function getRectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   const overlapX = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
   const overlapY = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
   return overlapX * overlapY;
 }
-
+// Add to your client.js initialization
+document.getElementById('copyIcon').addEventListener('click', function() {
+  const roomCode = document.getElementById('roomCodeDisplayInGame').textContent;
+  
+  // Create temporary input element
+  const tempInput = document.createElement('input');
+  tempInput.value = roomCode;
+  document.body.appendChild(tempInput);
+  tempInput.select();
+  
+  try {
+    // Copy to clipboard
+    document.execCommand('copy');
+    
+    // Visual feedback
+    const icon = document.getElementById('copyIcon');
+    icon.textContent = '✓';
+    icon.style.color = '#2ecc71';
+    
+    setTimeout(() => {
+      icon.textContent = '⎘';
+      icon.style.color = '#3498db';
+    }, 2000);
+    
+  } catch (err) {
+    console.error('Failed to copy text: ', err);
+  }
+  
+  document.body.removeChild(tempInput);
+});
 // Initialize
 window.addEventListener("load", () => {
   modals.initial.style.display = "flex";
-  canvas.width = 1200;
-  canvas.height = 1000;
   requestAnimationFrame(drawGame);
+  window.addEventListener("resize", handleResize);
+  window.addEventListener("orientationchange", function () {
+    setTimeout(handleResize, 300);
+  });
+});
+window.addEventListener("resize", function () {
+  if (grid && grid.length > 0) {
+    autoScaleGrid();
+  }
+});
+window.addEventListener("orientationchange", function () {
+  setTimeout(function () {
+    if (grid && grid.length > 0) {
+      autoScaleGrid();
+    }
+  }, 300);
 });

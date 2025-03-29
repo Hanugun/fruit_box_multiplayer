@@ -3,6 +3,7 @@
 <head>
   <title>Fruit Box Multiplayer</title>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -19,7 +20,6 @@
     <div class="modal-content">
       <h2>Create Room</h2>
       <input type="text" id="createNickname" placeholder="Nickname" required>
-      <input type="number" id="maxPlayers" min="1" max="5" value="2">
       <button id="confirmCreateRoom" class="modal-btn">Create</button>
     </div>
   </div>
@@ -50,12 +50,24 @@
       <div id="waitOverlay">
         <div class="wait-message">Waiting for next game...</div>
       </div>
-      <canvas id="gameCanvas"></canvas>
-      <div id="scoreboard"></div>
+      <div id="gameHeader" 
+     ontouchstart="return false" 
+     onselectstart="return false" 
+     style="-webkit-touch-callout: none;">
+        <div id="scoreboard"></div>
+        <div id="gameInfo">
+          <span id="roomCodeDisplayInGame"></span>
+          <span id="copyIcon" class="copy-icon">⎘</span>
+          <span id="timeLeft">Time Left: 0s</span>
+          <span id="yourScore">Your Score: 0</span>
+      </div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+      <!-- <div id="scoreboard"></div>
       <div id="gameInfo">
         <div id="timer">Time Left: <span id="timeLeft">0</span>s</div>
         <div id="score">Your Score: <span id="yourScore">0</span></div>
-      </div>
+      </div> -->
       <div id="bottomBar">
         <button id="resetButton">Reset</button>
         <div id="toggles">

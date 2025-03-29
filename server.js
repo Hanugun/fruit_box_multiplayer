@@ -8,7 +8,7 @@ const io = socketIO(server);
 app.use(express.static("public"));
 
 // Game configuration
-const GRID_ROWS = 15;
+const GRID_ROWS = 13;
 const GRID_COLS = 20;
 const GAME_DURATION = 120; // 2 minutes
 const rooms = new Map();
@@ -27,14 +27,14 @@ function createGrid() {
   const totalCells = GRID_ROWS * GRID_COLS;
   let numbers = [];
   const baseCount = Math.floor(totalCells / 9);
-  
+
   // Add each number (1..9) exactly baseCount times
   for (let n = 1; n <= 9; n++) {
     for (let i = 0; i < baseCount; i++) {
       numbers.push(n);
     }
   }
-  
+
   // Fill any remaining cells
   let remainder = totalCells - numbers.length;
   let n = 1;
@@ -43,10 +43,10 @@ function createGrid() {
     n = (n % 9) + 1;
     remainder--;
   }
-  
+
   // Shuffle the numbers
   numbers = numbers.sort(() => Math.random() - 0.5);
-  
+
   // Build the 2D array
   let board = [];
   let idx = 0;
@@ -71,54 +71,63 @@ io.on("connection", (socket) => {
   let currentRoom = null;
 
   // Create a new game room
-  socket.on("createRoom", ({ maxPlayers, nickname }) => {
+  socket.on("createRoom", ({ nickname }) => {
     const roomCode = generateRoomCode();
     const room = {
-      code: roomCode,
+      code: roomCode.toUpperCase(),
       host: socket.id,
-      maxPlayers: Math.min(5, Math.max(1, maxPlayers)),
+      maxPlayers: 10,
       players: new Map(),
       spectators: new Set(),
       gameActive: false,
       grid: null,
       timer: null,
-      timeLeft: GAME_DURATION
+      timeLeft: GAME_DURATION,
     };
-    
+
     room.players.set(socket.id, {
       id: socket.id,
       nickname,
       score: 0,
-      isActive: true
+      isActive: true,
     });
-    
+
     rooms.set(roomCode, room);
     currentRoom = roomCode;
     socket.join(roomCode);
-    
+
     socket.emit("roomCreated", {
       roomCode,
-      players: Array.from(room.players.values())
+      players: Array.from(room.players.values()),
     });
   });
 
   // Join an existing room
-  socket.on("joinRoom", ({ roomCode, nickname }) => {
-    const room = rooms.get(roomCode.toUpperCase());
-    if (!room) return socket.emit("roomError", "Room not found");
+ // Update the joinRoom handler
+ socket.on("joinRoom", ({ roomCode, nickname }) => {
+  const room = rooms.get(roomCode.toUpperCase());
+  if (!room) return socket.emit("roomError", "Room not found");
+  
+  // Clear any existing status
+  room.players.delete(socket.id);
+  room.spectators.delete(socket.id);
+  
+  if (room.gameActive) {
+    // ALWAYS join as spectator during active game
+    room.spectators.add(socket.id);
+    socket.join(roomCode);
     
-    if (room.gameActive) {
-      // Join as spectator if game is already active
-      room.spectators.add(socket.id);
-      socket.join(roomCode);
-      socket.emit("spectatorJoined", { 
-        grid: room.grid,
-        players: Array.from(room.players.values()),
-        timeLeft: room.timeLeft 
-      });
-      return;
-    }
-    
+    socket.emit("forceGameState", {
+      roomCode: room.code,
+      grid: room.grid,
+      players: Array.from(room.players.values()),
+      timeLeft: room.timeLeft,
+      isSpectator: true,
+      canPlay: false,
+      message: "Wait till the next game starts..."
+    });
+  } else {
+    // Normal join as player when game isn't active
     if (room.players.size >= room.maxPlayers) {
       return socket.emit("roomError", "Room is full");
     }
@@ -129,26 +138,68 @@ io.on("connection", (socket) => {
       score: 0,
       isActive: true 
     });
-    currentRoom = roomCode;
-    socket.join(roomCode);
-    
-    // Notify the joining player
+
     socket.emit("roomJoined", {
       roomCode,
-      players: Array.from(room.players.values())
+      players: Array.from(room.players.values()),
+      canPlay: true
     });
     
-    // Notify all players in the room
     io.to(roomCode).emit("playerJoined", Array.from(room.players.values()));
-  });
+  }
+  currentRoom = roomCode;
+  socket.join(roomCode);
+  
+});
+// Add this new event handler
+socket.on("requestRejoin", () => {
+  if (!currentRoom || !rooms.has(currentRoom)) {
+    socket.emit("roomError", "Room not found");
+    return;
+  }
+
+  const room = rooms.get(currentRoom);
+  
+  // Check if player was previously in this room
+  const wasPlayer = room.players.has(socket.id);
+  const wasSpectator = room.spectators.has(socket.id);
+
+  if (wasPlayer || wasSpectator) {
+    socket.join(room.code);
+    
+    if (room.gameActive) {
+      // Send full game state
+      socket.emit("forceGameState", {
+        grid: room.grid,
+        players: Array.from(room.players.values()),
+        timeLeft: room.timeLeft,
+        isSpectator: wasSpectator
+      });
+      
+      if (wasPlayer) {
+        // Reactivate player if they were disconnected
+        const player = room.players.get(socket.id);
+        if (player) player.isActive = true;
+      }
+    } else {
+      // If game isn't active, just put them back in the lobby
+      socket.emit("roomJoined", {
+        roomCode: room.code,
+        players: Array.from(room.players.values())
+      });
+    }
+  } else {
+    socket.emit("roomError", "Not previously in this room");
+  }
+});
   socket.on("quitRoom", () => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-    
+
     if (room.players.has(socket.id)) {
       room.players.delete(socket.id);
       io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
-      
+
       if (room.players.size === 0) {
         clearInterval(room.timer);
         rooms.delete(currentRoom);
@@ -159,44 +210,82 @@ io.on("connection", (socket) => {
   socket.on("startGame", () => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
-    
+  
+    // Clear existing timer
+    if (room.timer) clearInterval(room.timer);
+  
+    // Convert ALL spectators to players (if there's space)
+    const spectatorIds = Array.from(room.spectators.keys());
+    spectatorIds.forEach(spectatorId => {
+      if (room.players.size < room.maxPlayers) {
+        const spectatorSocket = io.sockets.sockets.get(spectatorId);
+        if (spectatorSocket) {
+          room.players.set(spectatorId, {
+            id: spectatorId,
+            nickname: spectatorSocket.nickname || `Player ${room.players.size + 1}`,
+            score: 0,
+            isActive: true
+          });
+          room.spectators.delete(spectatorId);
+        }
+      }
+    });
+  
+    // Reset game state for all players
+    room.players.forEach(player => {
+      player.score = 0;
+      player.isActive = true; // Ensure all players are active
+    });
+  
     room.gameActive = true;
     room.grid = createGrid();
     room.timeLeft = GAME_DURATION;
-    
-    // Start game timer
+  
+    // Start timer
     room.timer = setInterval(() => {
-        room.timeLeft--;
-        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
-        
-        if (room.timeLeft <= 0) {
-          clearInterval(room.timer);
-          // Only end game if there are players
-          if (room.players.size > 0) {
-            endGame(room);
-          } else {
-            // No players, just clean up
-            clearInterval(room.timer);
-            rooms.delete(room.code);
-          }
-        }
-      }, 1000);
-    
-    // Notify all players that game has started
+      room.timeLeft--;
+      io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
+      if (room.timeLeft <= 0) {
+        clearInterval(room.timer);
+        endGame(room);
+      }
+    }, 1000);
+  
+    // Notify all clients
     io.to(room.code).emit("gameStarted", {
+      roomCode: room.code,
       grid: room.grid,
       players: Array.from(room.players.values())
     });
+  
+    // Force update state for everyone
+    io.to(room.code).emit("forceGameState", {
+      grid: room.grid,
+      players: Array.from(room.players.values()),
+      timeLeft: room.timeLeft,
+      isSpectator: false,
+      canPlay: true,
+      message: ""
+    });
   });
-
   // Handle apple selection attempts
   socket.on("selectApples", (data) => {
+    if (!currentRoom) {
+      return socket.emit("selectionFail", { reason: "Not in a room" });
+    }
     const room = rooms.get(currentRoom);
-    if (!room || !room.gameActive || !room.players.get(socket.id)?.isActive) return;
-    
+    if (!room || !room.gameActive) {
+      return socket.emit("selectionFail", { reason: "Game not active" });
+    }
+  
+    const player = room.players.get(socket.id);
+    if (!player || !player.isActive) {
+      return socket.emit("selectionFail", { reason: "Player not active" });
+    }
+  
     let sum = 0;
     let validCells = [];
-    
+
     // Validate selected cells
     for (let cell of data.cells) {
       const { row, col } = cell;
@@ -205,24 +294,24 @@ io.on("connection", (socket) => {
         validCells.push({ row, col });
       }
     }
-    
+
     // If selection sums to 10 and has at least one cell
     if (sum === 10 && validCells.length > 0) {
       // Clear the selected cells
       validCells.forEach(({ row, col }) => {
         room.grid[row][col] = 0;
       });
-      
+
       // Update player score
       const player = room.players.get(socket.id);
       player.score += calculateScore(validCells.length);
-      
+
       // Notify all players of successful selection
       io.to(room.code).emit("selectionSuccess", {
         removed: validCells,
         playerId: socket.id,
-        newScore: player.score
-      });      
+        newScore: player.score,
+      });
     } else {
       // Notify player of failed selection
       socket.emit("selectionFail", { reason: "Invalid selection" });
@@ -233,10 +322,10 @@ io.on("connection", (socket) => {
   socket.on("playerCursor", (data) => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-    
+
     socket.to(room.code).emit("updateCursor", {
       playerId: socket.id,
-      ...data
+      ...data,
     });
   });
 
@@ -244,15 +333,14 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-    
+
     if (room.players.has(socket.id)) {
       const wasHost = room.host === socket.id;
       room.players.delete(socket.id);
-      
       if (wasHost) {
         // Notify all players that host has left
         io.to(room.code).emit("hostDisconnected");
-        
+
         // Clean up room if host was the only player
         if (room.players.size === 0) {
           clearInterval(room.timer);
@@ -262,10 +350,9 @@ io.on("connection", (socket) => {
           room.host = room.players.keys().next().value;
         }
       }
-      
+
       io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
-    } 
-    else if (room.spectators.has(socket.id)) {
+    } else if (room.spectators.has(socket.id)) {
       room.spectators.delete(socket.id);
     }
   });
@@ -276,38 +363,38 @@ io.on("connection", (socket) => {
   function endGame(room) {
     room.gameActive = false;
     clearInterval(room.timer);
-    
+
     const players = Array.from(room.players.values());
-    
+
     // Check if there are any players left
     if (players.length === 0) {
       // No players left, just clean up
       rooms.delete(room.code);
       return;
     }
-    
+
     let winner = players[0];
-    
+
     // Find player with highest score
     for (let i = 1; i < players.length; i++) {
       if (players[i].score > winner.score) {
         winner = players[i];
       }
     }
-    
+
     // Check if we actually have a winner
     if (winner) {
       io.to(room.code).emit("gameOver", {
         players,
         winner: winner.nickname || "Anonymous",
-        score: winner.score
+        score: winner.score,
       });
     } else {
       // Fallback if no winner could be determined
       io.to(room.code).emit("gameOver", {
         players,
         winner: "No winner",
-        score: 0
+        score: 0,
       });
     }
   }
