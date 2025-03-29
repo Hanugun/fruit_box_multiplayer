@@ -40,7 +40,8 @@ socket.on("forceGameState", (data) => {
   autoScaleGrid();
   updateScoreboard();
 });
-// Connection handling (add this right after socket initialization)
+
+// Connection handling
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -48,10 +49,7 @@ socket.on("connect", () => {
   reconnectAttempts = 0;
   
   if (currentRoom && myNickname) {
-      // Try to rejoin with existing credentials
       socket.emit("requestRejoin");
-      
-      // Also update UI
       document.getElementById("waitOverlay").style.display = "flex";
       document.querySelector("#waitOverlay .wait-message").textContent = 
           "Reconnecting to game...";
@@ -77,6 +75,7 @@ socket.on("reconnect_attempt", (attempt) => {
   }
 });
 
+// Prevent text selection during gameplay
 document.addEventListener('selectstart', function(e) {
   if (gameActive) {
     e.preventDefault();
@@ -84,13 +83,14 @@ document.addEventListener('selectstart', function(e) {
   }
 });
 
-// Additional protection for drag operations
+// Prevent dragging header
 document.addEventListener('mousedown', function(e) {
   if (gameActive && e.target.closest('#gameHeader')) {
     e.preventDefault();
   }
 }, { passive: false });
-// Should be right after socket.io initialization
+
+// Prevent touch events from scrolling
 document.addEventListener(
   "touchstart",
   function (e) {
@@ -105,20 +105,19 @@ document.addEventListener(
   },
   { passive: false }
 );
+
+// Game state variables
 let myNickname = "";
 let currentRoom = "";
 let isHost = false;
 let gameActive = false;
-
-// Game state variables
 let grid = [];
 let players = {};
 let myScore = 0;
-// Add this near the top with other DOM elements
+
+// DOM elements
 const roomCodeDisplayElem = document.getElementById("roomCodeDisplay");
 const resetButton = document.getElementById("resetButton");
-const quitButton = document.createElement("button"); // We'll add this dynamically
-// DOM elements
 const timeLeftElem = document.getElementById("timeLeft");
 const myScoreElem = document.getElementById("yourScore");
 const scoreboardDiv = document.getElementById("scoreboard");
@@ -130,6 +129,8 @@ let cellSize = 50;
 let offsetX = 0;
 let offsetY = 0;
 const margin = 50;
+
+// Selection state
 const selection = {
   isActive: false,
   startX: 0,
@@ -139,6 +140,7 @@ const selection = {
   isValid: false,
   highlightedCells: [],
 };
+
 // Animation
 let removingApples = [];
 let remoteCursors = {};
@@ -153,18 +155,11 @@ const bgmChill = new Audio("chill.m4a");
 const bgmAnime = new Audio("anime.m4a");
 const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
 const availableColors = [
-  "#FF0000",
-  "#FF9900",
-  "#FFFF00",
-  "#00FF00",
-  "#00FFFF",
-  "#FF00FF",
-  "#FFFFFF",
-  "#FFD700",
-  "#00BFFF",
-  "#8A2BE2",
+  "#FF0000", "#FF9900", "#FFFF00", "#00FF00", "#00FFFF",
+  "#FF00FF", "#FFFFFF", "#FFD700", "#00BFFF", "#8A2BE2"
 ];
 const playerColors = {};
+
 // Modals
 const modals = {
   initial: document.getElementById("initialModal"),
@@ -192,11 +187,10 @@ document.getElementById("confirmCreateRoom").addEventListener("click", () => {
     alert("Please enter a valid nickname");
     return;
   }
-
   myNickname = nickname;
-  // Always set maxPlayers to 10
   socket.emit("createRoom", { nickname });
 });
+
 document.getElementById("joinExistingBtn").addEventListener("click", () => {
   modals.initial.style.display = "none";
   modals.join.style.display = "flex";
@@ -204,10 +198,7 @@ document.getElementById("joinExistingBtn").addEventListener("click", () => {
 
 document.getElementById("confirmJoinRoom").addEventListener("click", () => {
   const nickname = document.getElementById("joinNickname").value.trim();
-  const roomCode = document
-    .getElementById("joinRoomCode")
-    .value.trim()
-    .toUpperCase();
+  const roomCode = document.getElementById("joinRoomCode").value.trim().toUpperCase();
 
   if (!nickname || !roomCode) {
     alert("Please enter both nickname and room code");
@@ -222,16 +213,13 @@ document.getElementById("confirmJoinRoom").addEventListener("click", () => {
 socket.on("roomJoined", ({ roomCode, players }) => {
   currentRoom = roomCode;
   isHost = false;
-  roomCodeDisplayElem.textContent = roomCode;
   updateRoomCodeDisplay();
   modals.lobby.style.display = "flex";
   updatePlayerList(players);
 
-  // Hide the Start Game button for non-hosts.
   const startBtn = document.getElementById("startGameBtn");
   startBtn.style.display = "none";
 
-  // If there is no waiting message already, add one.
   if (!document.getElementById("waitingMessage")) {
     const waitingMsg = document.createElement("p");
     waitingMsg.id = "waitingMessage";
@@ -271,13 +259,11 @@ document.getElementById("popVolume").addEventListener("input", (e) => {
 socket.on("roomCreated", ({ roomCode, players }) => {
   currentRoom = roomCode;
   isHost = true;
-  roomCodeDisplayElem.textContent = roomCode;
   updateRoomCodeDisplay();
   modals.create.style.display = "none";
   modals.lobby.style.display = "flex";
   updatePlayerList(players);
 
-  // Show start button and remove waiting message if it exists.
   const startBtn = document.getElementById("startGameBtn");
   startBtn.disabled = false;
   startBtn.style.display = "inline-block";
@@ -291,43 +277,39 @@ socket.on("playerJoined", (players) => {
     document.getElementById("startGameBtn").disabled = players.length < 1;
   }
 });
+
 socket.on("playerLeft", (players) => {
   updatePlayerList(players);
 });
-// Client-side (client.js)
+
 socket.on("gameStarted", (gameState) => {
-  // Check if current player is in the players list
   const isPlayer = gameState.players.some(p => p.id === socket.id);
   gameActive = isPlayer;
   
   if (isPlayer) {
-    // Player can interact
     document.getElementById("waitOverlay").style.display = "none";
     canvas.classList.remove("spectator");
   } else {
-    // Spectator view
     document.getElementById("waitOverlay").style.display = "flex";
     document.querySelector("#waitOverlay .wait-message").textContent = 
       "Wait for the next game to start...";
     canvas.classList.add("spectator");
   }
 
-  // Update game state
   grid = gameState.grid;
   players = gameState.players.reduce((acc, player) => {
     acc[player.id] = player;
     return acc;
   }, {});
 
-  // Update UI
   updateScoreboard();
   autoScaleGrid();
 });
+
 socket.on("spectatorJoined", (gameState) => {
   gameActive = false;
   initializeGame(gameState);
   
-  // Ensure all modals are hidden
   Object.values(modals).forEach(modal => {
       modal.style.display = "none";
   });
@@ -351,7 +333,6 @@ socket.on("selectionSuccess", (data) => {
   if (playerId === socket.id) {
     myScore = newScore;
     myScoreElem.textContent = `Your Score: ${myScore}`;
-    // Only play sound for local player
     popSound.currentTime = 0;
     popSound.play();
   }
@@ -380,33 +361,27 @@ socket.on("selectionSuccess", (data) => {
 });
 
 socket.on("selectionFail", (data) => {
-  // console.log("Selection failed:", data.reason);
+  console.log("Selection failed:", data.reason);
 });
 
 socket.on("timerUpdate", (data) => {
   timeLeftElem.textContent = `Time Left: ${data.timeLeft}s`;
 });
-// Update the gameOver handler:
+
 socket.on("gameOver", (data) => {
   gameActive = false;
   resetSelection();
   const finalScoreElem = document.getElementById("finalScore");
   finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${data.winner} (${data.score})`;
 
-  // Show the game over modal
   modals.gameOver.style.display = "flex";
+  const gameOverModalContent = document.querySelector("#gameOverModal .modal-content");
 
-  const gameOverModalContent = document.querySelector(
-    "#gameOverModal .modal-content"
-  );
-
-  // Remove any existing buttons to avoid duplicates
   const existingPlayAgain = document.getElementById("playAgainBtn");
   if (existingPlayAgain) existingPlayAgain.remove();
   const existingQuit = document.getElementById("quitBtn");
   if (existingQuit) existingQuit.remove();
 
-  // Only add the "Play Again" button if this client is the host
   if (isHost) {
     const playAgainBtn = document.createElement("button");
     playAgainBtn.id = "playAgainBtn";
@@ -419,7 +394,6 @@ socket.on("gameOver", (data) => {
     gameOverModalContent.appendChild(playAgainBtn);
   }
 
-  // Add the "Quit" button for all players
   const quitBtn = document.createElement("button");
   quitBtn.id = "quitBtn";
   quitBtn.textContent = "Quit";
@@ -430,40 +404,17 @@ socket.on("gameOver", (data) => {
   });
   gameOverModalContent.appendChild(quitBtn);
 });
+
 socket.on("hostDisconnected", () => {
   alert("The host has left the game. You will be returned to the main menu.");
   window.location.reload();
 });
+
 socket.on("gameReset", () => {
-  // Only request rejoin if we're already in a game
   if (gameActive) {
     socket.emit("requestRejoin");
   }
 });
-// Reset button functionality
-resetButton.addEventListener("click", () => {
-  if (isHost) {
-    socket.emit("startGame");
-  } else {
-    // For non-hosts, request current game state
-    socket.emit("requestRejoin");
-  }
-});
-
-// Update the room code display position
-function updateRoomCodeDisplay() {
-  const gameInfo = document.getElementById("gameInfo");
-  const roomCodeSpan = document.createElement("span");
-  roomCodeSpan.id = "roomCodeDisplayInGame";
-  roomCodeSpan.textContent = currentRoom;
-  roomCodeSpan.style.margin = "0 auto";
-
-  // Clear any existing room code display
-  const existing = document.getElementById("roomCodeDisplayInGame");
-  if (existing) existing.remove();
-
-  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
-}
 
 socket.on("updateCursor", (data) => {
   remoteCursors[data.playerId] = data;
@@ -498,36 +449,39 @@ function autoScaleGrid() {
 }
 
 function updateScoreboard() {
-  let html = "<h3>Scoreboard</h3><ul>";
-  for (let pid in players) {
-    let name =
-      players[pid].nickname || playerNames[pid] || "Player " + nextPlayerNumber;
-    if (!playerNames[pid] && !players[pid].nickname) {
-      playerNames[pid] = "Player " + nextPlayerNumber;
-      nextPlayerNumber++;
-      name = playerNames[pid];
-    }
-    let color = getPlayerColor(pid);
-    let score = players[pid].score || 0;
-    html += `<li style="color: ${color};">${name}: ${score}</li>`;
+  const sortedPlayers = Object.values(players).sort((a, b) => b.score - a.score);
+  let html = `<div class="scoreboard-grid">`;
+
+  sortedPlayers.slice(0, 3).forEach((player, index) => {
+    const color = getPlayerColor(player.id);
+    html += `
+            <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
+                 style="border-color: ${color}">
+                <span class="medal">${["🥇", "🥈", "🥉"][index]}</span>
+                <span class="name" style="color: ${color}">${player.nickname}</span>
+                <span class="score">${player.score}</span>
+            </div>
+        `;
+  });
+
+  if (sortedPlayers.length > 3) {
+    html += `<div class="more-players">+${sortedPlayers.length - 3}</div>`;
   }
-  html += "</ul>";
+
+  html += `</div>`;
   scoreboardDiv.innerHTML = html;
 }
 
 function getPlayerColor(playerId) {
-  // Return assigned color if it already exists.
   if (playerColors[playerId]) {
     return playerColors[playerId];
   }
-  // Find a color that is not already used.
   for (let color of availableColors) {
     if (!Object.values(playerColors).includes(color)) {
       playerColors[playerId] = color;
       return color;
     }
   }
-  // Fallback if all colors are taken (should rarely happen with 10 colors)
   playerColors[playerId] = availableColors[0];
   return availableColors[0];
 }
@@ -556,10 +510,7 @@ function drawGame() {
   // Draw apples
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (
-        grid[r][c] > 0 &&
-        !removingApples.some((a) => a.row === r && a.col === c)
-      ) {
+      if (grid[r][c] > 0 && !removingApples.some((a) => a.row === r && a.col === c)) {
         let x = offsetX + c * cellSize;
         let y = offsetY + r * cellSize;
         drawApple(x, y, grid[r][c], 1.0, 1.0);
@@ -570,32 +521,30 @@ function drawGame() {
   // Draw animations
   drawDroppedApples();
 
-  // Draw selection (new system only)
+  // Draw selection
   drawSelection();
 
-  // Draw remote cursors
+  // Draw remote cursors and selections
   for (let pid in remoteCursors) {
     let data = remoteCursors[pid];
     const color = getPlayerColor(pid);
+    
+    // Draw cursor
     ctx.save();
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(data.x, data.y, 5, 0, 2 * Math.PI);
+    ctx.arc(data.x * canvas.width, data.y * canvas.height, 5, 0, 2 * Math.PI);
     ctx.fill();
+    
+    // Draw selection if dragging
     if (data.isDragging && data.selection) {
-      let {
-        startX: sX,
-        startY: sY,
-        currentX: cX,
-        currentY: cY,
-      } = data.selection;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.strokeRect(
-        Math.min(sX, cX),
-        Math.min(sY, cY),
-        Math.abs(sX - cX),
-        Math.abs(sY - cY)
+        data.selection.startX * canvas.width,
+        data.selection.startY * canvas.height,
+        (data.selection.currentX - data.selection.startX) * canvas.width,
+        (data.selection.currentY - data.selection.startY) * canvas.height
       );
     }
     ctx.restore();
@@ -603,6 +552,7 @@ function drawGame() {
 
   requestAnimationFrame(drawGame);
 }
+
 function drawApple(x, y, value, alpha, scale) {
   const minRadius = 1;
   const radius = Math.max(minRadius, (cellSize / 2 - 5) * scale);
@@ -644,10 +594,7 @@ function drawDroppedApples() {
       y = origY - apple.arcPeak * (1 - Math.pow(1 - p, 3));
     } else {
       let p = (progress - 0.5) / 0.5;
-      y =
-        origY -
-        apple.arcPeak +
-        Math.pow(p, 3) * (canvas.height + 50 - (origY - apple.arcPeak));
+      y = origY - apple.arcPeak + Math.pow(p, 3) * (canvas.height + 50 - (origY - apple.arcPeak));
     }
 
     drawApple(x, y, apple.value, 1.0 - progress, 1.0 - progress * 0.5);
@@ -657,25 +604,21 @@ function drawDroppedApples() {
 function updatePlayerList(players) {
   const list = document.getElementById("playerList");
   list.innerHTML = players
-    .map(
-      (player) =>
-        `<li>${player.nickname} ${player.id === socket.id ? "(you)" : ""}</li>`
-    )
+    .map((player) => `<li>${player.nickname} ${player.id === socket.id ? "(you)" : ""}</li>`)
     .join("");
 }
+
 function initializeGame(gameState) {
   grid = gameState.grid;
   players = gameState.players.reduce((acc, player) => {
-      acc[player.id] = player;
-      return acc;
+    acc[player.id] = player;
+    return acc;
   }, {});
 
-  // Reset UI state
   modals.initial.style.display = "none";
   modals.lobby.style.display = "none";
   modals.gameOver.style.display = "none";
   
-  // Responsive canvas sizing
   const container = document.getElementById('gameContainer');
   canvas.width = container.clientWidth - 20;
   canvas.height = container.clientHeight - 20;
@@ -683,16 +626,16 @@ function initializeGame(gameState) {
   autoScaleGrid();
   updateScoreboard();
   
-  // Show appropriate UI based on player status
   document.getElementById("gameContainer").style.display = "block";
   if (gameActive) {
-      document.getElementById("waitOverlay").style.display = "none";
-      canvas.classList.remove("spectator");
+    document.getElementById("waitOverlay").style.display = "none";
+    canvas.classList.remove("spectator");
   } else {
-      document.getElementById("waitOverlay").style.display = "flex";
-      canvas.classList.add("spectator");
+    document.getElementById("waitOverlay").style.display = "flex";
+    canvas.classList.add("spectator");
   }
 }
+
 function handleResize() {
   if (grid && grid.length > 0) {
     const container = document.getElementById("gameContainer");
@@ -702,7 +645,7 @@ function handleResize() {
   }
 }
 
-// Convert touch events to mouse events:
+// Convert touch events to mouse events
 canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
 canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
 canvas.addEventListener("touchend", handleTouchEnd);
@@ -711,12 +654,10 @@ function handleTouchStart(e) {
   e.preventDefault();
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
+  
   selection.isActive = true;
-  selection.startX = (touch.clientX - rect.left) * scaleX;
-  selection.startY = (touch.clientY - rect.top) * scaleY;
+  selection.startX = (touch.clientX - rect.left) / rect.width;
+  selection.startY = (touch.clientY - rect.top) / rect.height;
   selection.currentX = selection.startX;
   selection.currentY = selection.startY;
 
@@ -730,11 +671,9 @@ function handleTouchMove(e) {
 
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
-  selection.currentX = (touch.clientX - rect.left) * scaleX;
-  selection.currentY = (touch.clientY - rect.top) * scaleY;
+  
+  selection.currentX = (touch.clientX - rect.left) / rect.width;
+  selection.currentY = (touch.clientY - rect.top) / rect.height;
 
   updateSelectionValidity();
   sendCursorUpdate();
@@ -757,12 +696,10 @@ canvas.addEventListener("mousedown", (e) => {
   if (!gameActive) return;
 
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
+  
   selection.isActive = true;
-  selection.startX = (e.clientX - rect.left) * scaleX;
-  selection.startY = (e.clientY - rect.top) * scaleY;
+  selection.startX = (e.clientX - rect.left) / rect.width;
+  selection.startY = (e.clientY - rect.top) / rect.height;
   selection.currentX = selection.startX;
   selection.currentY = selection.startY;
 
@@ -774,11 +711,9 @@ canvas.addEventListener("mousemove", (e) => {
   if (!gameActive || !selection.isActive) return;
 
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-
-  selection.currentX = (e.clientX - rect.left) * scaleX;
-  selection.currentY = (e.clientY - rect.top) * scaleY;
+  
+  selection.currentX = (e.clientX - rect.left) / rect.width;
+  selection.currentY = (e.clientY - rect.top) / rect.height;
 
   updateSelectionValidity();
   sendCursorUpdate();
@@ -794,11 +729,17 @@ window.addEventListener("mouseup", () => {
   resetSelection();
   sendCursorUpdate();
 });
+
 function updateSelectionValidity() {
-  const selX = Math.min(selection.startX, selection.currentX);
-  const selY = Math.min(selection.startY, selection.currentY);
-  const selW = Math.abs(selection.startX - selection.currentX);
-  const selH = Math.abs(selection.startY - selection.currentY);
+  const startX = selection.startX * canvas.width;
+  const startY = selection.startY * canvas.height;
+  const currentX = selection.currentX * canvas.width;
+  const currentY = selection.currentY * canvas.height;
+  
+  const selX = Math.min(startX, currentX);
+  const selY = Math.min(startY, currentY);
+  const selW = Math.abs(startX - currentX);
+  const selH = Math.abs(startY - currentY);
 
   let sum = 0;
   selection.highlightedCells = [];
@@ -812,12 +753,8 @@ function updateSelectionValidity() {
       const centerX = x + cellSize / 2;
       const centerY = y + cellSize / 2;
 
-      if (
-        centerX >= selX &&
-        centerX <= selX + selW &&
-        centerY >= selY &&
-        centerY <= selY + selH
-      ) {
+      if (centerX >= selX && centerX <= selX + selW &&
+          centerY >= selY && centerY <= selY + selH) {
         if (grid[r][c] > 0) {
           sum += grid[r][c];
           selection.highlightedCells.push({ row: r, col: c });
@@ -828,63 +765,27 @@ function updateSelectionValidity() {
 
   selection.isValid = sum === 10 && selection.highlightedCells.length > 0;
 }
-function updateScoreboard() {
-  const sortedPlayers = Object.values(players).sort(
-    (a, b) => b.score - a.score
-  );
 
-  let html = `<div class="scoreboard-grid">`;
-
-  sortedPlayers.slice(0, 3).forEach((player, index) => {
-    const color = getPlayerColor(player.id);
-    html += `
-            <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
-                 style="border-color: ${color}">
-                <span class="medal">${["🥇", "🥈", "🥉"][index]}</span>
-                <span class="name" style="color: ${color}">${
-      player.nickname
-    }</span>
-                <span class="score">${player.score}</span>
-            </div>
-        `;
-  });
-
-  if (sortedPlayers.length > 3) {
-    html += `<div class="more-players">+${sortedPlayers.length - 3}</div>`;
-  }
-
-  html += `</div>`;
-  scoreboardDiv.innerHTML = html;
-}
-function createPlayerRow(player, rank) {
-  const isYou = player.id === socket.id;
-  return `
-        <div class="player-row ${isYou ? "you" : ""}">
-            <span class="rank">${rank + 1}.</span>
-            <span class="name">${player.nickname}</span>
-            <span class="score">${player.score}</span>
-            ${isYou ? '<span class="you-badge">YOU</span>' : ""}
-        </div>
-    `;
-}
 function drawSelection() {
   if (!selection.isActive || !grid.length) return;
-  const selX = Math.min(selection.startX, selection.currentX);
-  const selY = Math.min(selection.startY, selection.currentY);
-  const selW = Math.abs(selection.startX - selection.currentX);
-  const selH = Math.abs(selection.startY - selection.currentY);
+  
+  const startX = selection.startX * canvas.width;
+  const startY = selection.startY * canvas.height;
+  const currentX = selection.currentX * canvas.width;
+  const currentY = selection.currentY * canvas.height;
+  
+  const selX = Math.min(startX, currentX);
+  const selY = Math.min(startY, currentY);
+  const selW = Math.abs(startX - currentX);
+  const selH = Math.abs(startY - currentY);
 
   // Draw selection box
-  ctx.strokeStyle = selection.isValid
-    ? "rgba(0, 200, 0, 0.8)"
-    : "rgba(0, 0, 255, 0.8)";
+  ctx.strokeStyle = selection.isValid ? "rgba(0, 200, 0, 0.8)" : "rgba(0, 0, 255, 0.8)";
   ctx.lineWidth = 2;
   ctx.strokeRect(selX, selY, selW, selH);
 
   // Fill selection area
-  ctx.fillStyle = selection.isValid
-    ? "rgba(0, 255, 0, 0.1)"
-    : "rgba(0, 0, 255, 0.1)";
+  ctx.fillStyle = selection.isValid ? "rgba(0, 255, 0, 0.1)" : "rgba(0, 0, 255, 0.1)";
   ctx.fillRect(selX, selY, selW, selH);
 
   // Highlight selected apples
@@ -894,18 +795,10 @@ function drawSelection() {
 
     // Draw highlight circle
     ctx.save();
-    ctx.strokeStyle = selection.isValid
-      ? "rgba(255, 255, 0, 0.8)"
-      : "rgba(255, 165, 0, 0.8)";
+    ctx.strokeStyle = selection.isValid ? "rgba(255, 255, 0, 0.8)" : "rgba(255, 165, 0, 0.8)";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(
-      x + cellSize / 2,
-      y + cellSize / 2,
-      cellSize / 2 - 2,
-      0,
-      Math.PI * 2
-    );
+    ctx.arc(x + cellSize / 2, y + cellSize / 2, cellSize / 2 - 2, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   });
@@ -922,43 +815,49 @@ function resetSelection() {
   selection.isValid = false;
   selection.highlightedCells = [];
 }
+
 function sendCursorUpdate() {
   if (!gameActive) return;
 
+  const rect = canvas.getBoundingClientRect();
   socket.emit("playerCursor", {
     x: selection.currentX,
     y: selection.currentY,
     isDragging: selection.isActive,
-    selection: selection.isActive
-      ? {
-          startX: selection.startX,
-          startY: selection.startY,
-          currentX: selection.currentX,
-          currentY: selection.currentY,
-        }
-      : null,
+    selection: selection.isActive ? {
+      startX: selection.startX,
+      startY: selection.startY,
+      currentX: selection.currentX,
+      currentY: selection.currentY
+    } : null
   });
 }
-function getRectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-  const overlapX = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
-  const overlapY = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
-  return overlapX * overlapY;
+
+function updateRoomCodeDisplay() {
+  const gameInfo = document.getElementById("gameInfo");
+  const roomCodeSpan = document.createElement("span");
+  roomCodeSpan.id = "roomCodeDisplayInGame";
+  roomCodeSpan.textContent = currentRoom;
+  roomCodeSpan.style.margin = "0 auto";
+
+  const existing = document.getElementById("roomCodeDisplayInGame");
+  if (existing) existing.remove();
+
+  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
 }
-// Add to your client.js initialization
+
+// Copy room code functionality
 document.getElementById('copyIcon').addEventListener('click', function() {
   const roomCode = document.getElementById('roomCodeDisplayInGame').textContent;
   
-  // Create temporary input element
   const tempInput = document.createElement('input');
   tempInput.value = roomCode;
   document.body.appendChild(tempInput);
   tempInput.select();
   
   try {
-    // Copy to clipboard
     document.execCommand('copy');
     
-    // Visual feedback
     const icon = document.getElementById('copyIcon');
     icon.textContent = '✓';
     icon.style.color = '#2ecc71';
@@ -967,31 +866,28 @@ document.getElementById('copyIcon').addEventListener('click', function() {
       icon.textContent = '⎘';
       icon.style.color = '#3498db';
     }, 2000);
-    
   } catch (err) {
     console.error('Failed to copy text: ', err);
   }
   
   document.body.removeChild(tempInput);
 });
+
 // Initialize
 window.addEventListener("load", () => {
   modals.initial.style.display = "flex";
   requestAnimationFrame(drawGame);
   window.addEventListener("resize", handleResize);
-  window.addEventListener("orientationchange", function () {
+  window.addEventListener("orientationchange", function() {
     setTimeout(handleResize, 300);
   });
 });
-window.addEventListener("resize", function () {
-  if (grid && grid.length > 0) {
-    autoScaleGrid();
+
+// Reset button functionality
+resetButton.addEventListener("click", () => {
+  if (isHost) {
+    socket.emit("startGame");
+  } else {
+    socket.emit("requestRejoin");
   }
-});
-window.addEventListener("orientationchange", function () {
-  setTimeout(function () {
-    if (grid && grid.length > 0) {
-      autoScaleGrid();
-    }
-  }, 300);
 });
