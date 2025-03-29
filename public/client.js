@@ -1,5 +1,8 @@
 const socket = io();
 
+// Global variable for player's chosen nickname.
+let myNickname = "";
+
 // Grid data
 let grid = [];
 let players = {};
@@ -25,13 +28,13 @@ let isDragging = false;
 let startX = 0, startY = 0;
 let currentX = 0, currentY = 0;
 
-// Drop animation (apples drop instead of fade)
-let removingApples = []; // Each: { row, col, value, startTime, duration, dropDistance }
+// Drop animation (apples drop with arc)
+let removingApples = []; // Each: { row, col, value, startTime, duration, arcPeak, arcSide, direction }
 
 // Remote cursors
 let remoteCursors = {};
 
-// For assigning player names
+// For assigning player names (fallback if server has no nickname)
 let playerNames = {};
 let nextPlayerNumber = 1;
 
@@ -39,16 +42,16 @@ let nextPlayerNumber = 1;
  * Returns a unique color for a player based on their ID.
  */
 function getPlayerColor(playerId) {
-    const colors = [
-        "#FF0000", // bright red
-        "#FF9900", // bright orange
-        "#FFFF00", // bright yellow
-        "#00FF00", // bright lime green
-        "#00FFFF", // bright cyan
-        "#FF00FF", // bright magenta
-        "#FFFFFF", // white
-        "#FFD700"  // gold
-      ];
+  const colors = [
+    "#FF0000", // bright red
+    "#FF9900", // bright orange
+    "#FFFF00", // bright yellow
+    "#00FF00", // bright lime green
+    "#00FFFF", // bright cyan
+    "#FF00FF", // bright magenta
+    "#FFFFFF", // white
+    "#FFD700"  // gold
+  ];
   let hash = 0;
   for (let i = 0; i < playerId.length; i++) {
     hash = playerId.charCodeAt(i) + ((hash << 5) - hash);
@@ -89,15 +92,18 @@ function autoScaleGrid() {
 
 /**
  * Update scoreboard with player names and scores.
+ * If a player's nickname is set (from server), use that.
  */
 function updateScoreboard() {
   let html = "<h3>Scoreboard</h3><ul>";
   for (let pid in players) {
-    if (!playerNames[pid]) {
+    // Use nickname from server if available; otherwise fallback.
+    let name = players[pid].nickname || (playerNames[pid] || ("Player " + nextPlayerNumber));
+    if (!playerNames[pid] && !players[pid].nickname) {
       playerNames[pid] = "Player " + nextPlayerNumber;
       nextPlayerNumber++;
+      name = playerNames[pid];
     }
-    let name = playerNames[pid];
     let color = getPlayerColor(pid);
     let score = players[pid].score || 0;
     html += `<li style="color: ${color};">${name}: ${score}</li>`;
@@ -169,7 +175,7 @@ function drawGame() {
     }
   }
   
-  // Animate dropped apples (drop animation)
+  // Animate dropped apples with arc animation
   drawDroppedApples();
   
   // Draw local selection rectangle if dragging
@@ -234,60 +240,111 @@ function drawApple(x, y, value, alpha, scale) {
   ctx.fillText(value, x + cellSize / 2, y + cellSize / 2);
   ctx.restore();
 }
-
+// Bounce easing function (easeOutBounce)
+function easeOutBounce(t) {
+    if (t < (1 / 2.75)) {
+      return 7.5625 * t * t;
+    } else if (t < (2 / 2.75)) {
+      t -= 1.5 / 2.75;
+      return 7.5625 * t * t + 0.75;
+    } else if (t < (2.5 / 2.75)) {
+      t -= 2.25 / 2.75;
+      return 7.5625 * t * t + 0.9375;
+    } else {
+      t -= 2.625 / 2.75;
+      return 7.5625 * t * t + 0.984375;
+    }
+  }
+  
 /**
- * Animate removed apples with a drop animation.
- * Apples drop vertically by a fixed distance.
+ * Animate removed apples with an arc animation.
+ * Apples fly up and sideways in a parabolic arc.
  */
 function drawDroppedApples() {
     const now = performance.now();
-  
     for (let i = removingApples.length - 1; i >= 0; i--) {
       const apple = removingApples[i];
       const elapsed = now - apple.startTime;
-      const duration = apple.duration;
-  
-      if (elapsed >= duration) {
-        // animation finished => remove from array
+      if (elapsed >= apple.duration) {
         removingApples.splice(i, 1);
-      } else {
-        // progress in [0..1]
-        let progress = elapsed / duration;
-  
-        // Original (x, y) on the board
-        let origX = offsetX + apple.col * cellSize;
-        let origY = offsetY + apple.row * cellSize;
-  
-        // Move sideways linearly
-        let sideOffset = apple.arcSide * apple.direction * progress;
-        let x = origX + sideOffset;
-  
-        // Parabolic vertical offset
-        // We'll use a simple parabola: up = arcPeak * 4 * progress * (1 - progress)
-        // This gives 0 at progress=0 and progress=1, and a maximum at progress=0.5
-        let up = apple.arcPeak * 4 * progress * (1 - progress);
-        // The apple goes up from origY, so subtract 'up'
-        let y = origY - up;
-  
-        // draw the apple at (x, y)
-        drawApple(x, y, apple.value, 1.0, 1.0);
+        continue;
       }
+      let progress = elapsed / apple.duration;
+      let origX = offsetX + apple.col * cellSize;
+      let origY = offsetY + apple.row * cellSize;
+      
+      // Horizontal movement: linear
+      let sideOffset = apple.arcSide * apple.direction * progress;
+      let x = origX + sideOffset;
+      
+      let y;
+      if (progress <= 0.5) {
+        // Upward phase: from origY to origY - apple.arcPeak
+        let p = progress / 0.5; // normalize to [0,1]
+        y = origY - apple.arcPeak * easeOutCubic(p);
+      } else {
+        // Fall phase: from (origY - apple.arcPeak) to off-screen (canvas.height + 50)
+        let p = (progress - 0.5) / 0.5; // normalize to [0,1]
+        let startYPos = origY - apple.arcPeak;
+        let endYPos = canvas.height + 50;
+        y = startYPos + easeInCubic(p) * (endYPos - startYPos);
+      }
+      
+      drawApple(x, y, apple.value, 1.0, 1.0);
     }
   }
+  
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+  
+  function easeInCubic(t) {
+    return t * t * t;
+  }
+  
 
 /**
  * Draw the selection rectangle.
  */
 function drawSelectionRect() {
-  const selX = Math.min(startX, currentX);
-  const selY = Math.min(startY, currentY);
-  const selW = Math.abs(startX - currentX);
-  const selH = Math.abs(startY - currentY);
-  ctx.strokeStyle = "blue";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(selX, selY, selW, selH);
-}
-
+    const selX = Math.min(startX, currentX);
+    const selY = Math.min(startY, currentY);
+    const selW = Math.abs(startX - currentX);
+    const selH = Math.abs(startY - currentY);
+  
+    // Calculate sum for the selected area
+    let sum = 0;
+    const rows = grid.length;
+    const cols = grid[0].length;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let x = offsetX + c * cellSize;
+        let y = offsetY + r * cellSize;
+        const overlapArea = getRectOverlap(selX, selY, selW, selH, x, y, cellSize, cellSize);
+        const cellArea = cellSize * cellSize;
+        if (overlapArea >= cellArea / 2) {
+          sum += grid[r][c];
+        }
+      }
+    }
+  
+    // If sum is exactly 10, use a dimmed style
+    if (sum === 10) {
+      // Draw a semi-transparent fill to "dim" the selection box
+      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+      ctx.fillRect(selX, selY, selW, selH);
+      // And a thicker, darker border
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+      ctx.lineWidth = 3;
+    } else {
+      ctx.strokeStyle = "blue";
+      ctx.lineWidth = 2;
+    }
+    
+    ctx.strokeRect(selX, selY, selW, selH);
+  }
+  
+  
 /**
  * Finalize selection and emit selected cells to the server.
  */
@@ -299,7 +356,6 @@ function finalizeSelection() {
   
   const rows = grid.length;
   const cols = grid[0].length;
-  
   let selectedCells = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -332,28 +388,29 @@ socket.on("selectionSuccess", (data) => {
       myScore = newScore;
       myScoreElem.textContent = myScore;
     }
-  
+    
     removed.forEach(({ row, col }) => {
       let oldValue = grid[row][col];
       if (oldValue < 1) oldValue = 1;
-  
-      // pick random direction left/right
       let dir = Math.random() < 0.5 ? -1 : 1;
-  
+      // Randomize arcPeak between, say, 100 and 200 pixels.
+      let randomArcPeak = 100 + Math.random() * 100;
+      // Optionally randomize arcSide as well (e.g., between 80 and 120 pixels)
+      let randomArcSide = 80 + Math.random() * 40;
+      
       removingApples.push({
         row,
         col,
         value: oldValue,
         startTime: performance.now(),
-        duration: 600,    // 600ms for example
-        arcPeak: 150,     // how high it flies (px)
-        arcSide: 100,     // how far horizontally it travels
+        duration: 600,    // duration in milliseconds
+        arcPeak: randomArcPeak,
+        arcSide: randomArcSide,
         direction: dir
       });
-  
-      grid[row][col] = 0; // remove from the main grid
+      grid[row][col] = 0;
     });
-  
+    
     updateScoreboard();
   });
 
@@ -366,31 +423,28 @@ socket.on("timerUpdate", (data) => {
 });
 
 socket.on("gameOver", (data) => {
-    console.log("Game Over! Final Scores:", data.players);
-    
-    // Determine the winner
-    let winnerId = null;
-    for (let pid in data.players) {
-      if (!winnerId || data.players[pid].score > data.players[winnerId].score) {
-        winnerId = pid;
-      }
+  console.log("Game Over! Final Scores:", data.players);
+  
+  // Determine winner from players object
+  let winnerId = null;
+  for (let pid in data.players) {
+    if (!winnerId || data.players[pid].score > data.players[winnerId].score) {
+      winnerId = pid;
     }
-    let winnerName = playerNames[winnerId] || "Unknown";
-    let winnerScore = data.players[winnerId].score;
-    
-    const modal = document.getElementById("gameOverModal");
-    const finalScoreElem = document.getElementById("finalScore");
-    finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${winnerName} (${winnerScore})`;
-    modal.style.display = "flex";
-    
-    updateScoreboard();
+  }
+  let winnerName = players[winnerId] && players[winnerId].nickname ? players[winnerId].nickname : (playerNames[winnerId] || "Unknown");
+  let winnerScore = data.players[winnerId].score;
+  
+  const modal = document.getElementById("gameOverModal");
+  const finalScoreElem = document.getElementById("finalScore");
+  finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${winnerName} (${winnerScore})`;
+  modal.style.display = "flex";
+  
+  updateScoreboard();
 });
-socket.on("endGame", (data) => {
-    updateScoreboard();
-});
+
 // --- Remote Cursor Handling ---
 socket.on("updateCursor", (data) => {
-  // Data: { playerId, x, y, isDragging, selection }
   remoteCursors[data.playerId] = data;
 });
 socket.on("removeCursor", (data) => {
@@ -472,6 +526,34 @@ document.getElementById("popVolume").addEventListener("input", (e) => {
 });
 
 // ----------------------------------------------------
+// Nickname Modal Handling
+// ----------------------------------------------------
+const nicknameModal = document.getElementById("nicknameModal");
+const nicknameInput = document.getElementById("nicknameInput");
+const nicknameSubmit = document.getElementById("nicknameSubmit");
+
+// When the nickname is submitted, send it to the server and hide the modal.
+nicknameSubmit.addEventListener("click", () => {
+  const nickname = nicknameInput.value.trim();
+  if (nickname === "") {
+    alert("Please enter a nickname.");
+    return;
+  }
+  myNickname = nickname;
+  // Emit setNickname event to server
+  socket.emit("setNickname", { nickname });
+  // Also store locally
+  playerNames[socket.id] = nickname;
+  // Hide the modal
+  nicknameModal.style.display = "none";
+});
+
+// Optionally, prevent closing the modal without entering a nickname
+window.addEventListener("load", () => {
+  nicknameModal.style.display = "flex";
+});
+
+// ----------------------------------------------------
 // Mouse & UI Setup
 // ----------------------------------------------------
 canvas.addEventListener("mousedown", (e) => {
@@ -493,7 +575,7 @@ canvas.addEventListener("mousemove", (e) => {
   }
 });
 
-// Global mouseup: if released outside the canvas, end drag
+// Global mouseup: if released outside the canvas, end drag.
 window.addEventListener("mouseup", (e) => {
   if (isDragging) {
     isDragging = false;
@@ -512,7 +594,7 @@ document.getElementById("lightColors").addEventListener("change", (e) => {
   console.log("Light Colors toggled:", e.target.checked);
 });
 
-// Close modal
+// Close modal (for game over)
 document.getElementById("closeModal").addEventListener("click", () => {
   document.getElementById("gameOverModal").style.display = "none";
 });

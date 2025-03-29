@@ -1,5 +1,8 @@
 const socket = io();
 
+// Global variable for player's chosen nickname.
+let myNickname = "";
+
 // Grid data
 let grid = [];
 let players = {};
@@ -25,13 +28,13 @@ let isDragging = false;
 let startX = 0, startY = 0;
 let currentX = 0, currentY = 0;
 
-// Fade-out (now drop animation)
-let removingApples = []; // Each entry: { row, col, value, startTime, duration, dropDistance }
+// Drop animation (apples drop with arc)
+let removingApples = []; // Each: { row, col, value, startTime, duration, arcPeak, arcSide, direction }
 
 // Remote cursors
 let remoteCursors = {};
 
-// For assigning player names
+// For assigning player names (fallback if server has no nickname)
 let playerNames = {};
 let nextPlayerNumber = 1;
 
@@ -39,7 +42,16 @@ let nextPlayerNumber = 1;
  * Returns a unique color for a player based on their ID.
  */
 function getPlayerColor(playerId) {
-  const colors = ["blue", "orange", "purple", "cyan", "magenta", "lime", "gold", "pink"];
+  const colors = [
+    "#FF0000", // bright red
+    "#FF9900", // bright orange
+    "#FFFF00", // bright yellow
+    "#00FF00", // bright lime green
+    "#00FFFF", // bright cyan
+    "#FF00FF", // bright magenta
+    "#FFFFFF", // white
+    "#FFD700"  // gold
+  ];
   let hash = 0;
   for (let i = 0; i < playerId.length; i++) {
     hash = playerId.charCodeAt(i) + ((hash << 5) - hash);
@@ -58,15 +70,13 @@ function getRectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
 }
 
 /**
- * Scale & center the grid in the canvas,
- * leaving a margin on all sides.
+ * Scale & center the grid in the canvas, leaving a margin.
  */
 function autoScaleGrid() {
   if (!grid || grid.length === 0) return;
   const rows = grid.length;
   const cols = grid[0].length;
   
-  // Available area is canvas size minus 2*margin
   const availableWidth = canvas.width - margin * 2;
   const availableHeight = canvas.height - margin * 2;
   
@@ -82,15 +92,18 @@ function autoScaleGrid() {
 
 /**
  * Update scoreboard with player names and scores.
+ * If a player's nickname is set (from server), use that.
  */
 function updateScoreboard() {
   let html = "<h3>Scoreboard</h3><ul>";
   for (let pid in players) {
-    if (!playerNames[pid]) {
+    // Use nickname from server if available; otherwise fallback.
+    let name = players[pid].nickname || (playerNames[pid] || ("Player " + nextPlayerNumber));
+    if (!playerNames[pid] && !players[pid].nickname) {
       playerNames[pid] = "Player " + nextPlayerNumber;
       nextPlayerNumber++;
+      name = playerNames[pid];
     }
-    let name = playerNames[pid];
     let color = getPlayerColor(pid);
     let score = players[pid].score || 0;
     html += `<li style="color: ${color};">${name}: ${score}</li>`;
@@ -130,12 +143,10 @@ function drawGame() {
     let data = remoteCursors[pid];
     const color = getPlayerColor(pid);
     ctx.save();
-    // Draw cursor as a small circle
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(data.x, data.y, 5, 0, 2 * Math.PI);
     ctx.fill();
-    // Draw selection rectangle if dragging
     if (data.isDragging && data.selection) {
       let { startX: sX, startY: sY, currentX: cX, currentY: cY } = data.selection;
       ctx.strokeStyle = color;
@@ -164,7 +175,7 @@ function drawGame() {
     }
   }
   
-  // Animate dropped apples (drop animation instead of fade)
+  // Animate dropped apples with arc animation
   drawDroppedApples();
   
   // Draw local selection rectangle if dragging
@@ -223,51 +234,117 @@ function drawApple(x, y, value, alpha, scale) {
   ctx.fill();
   
   ctx.fillStyle = "white";
-  // Make numbers bold by using "bold" in the font style
-  ctx.font = `bold ${Math.floor(20 * scale)}px Arial`;
+  ctx.font = `bold ${Math.floor(30 * scale)}px Arial`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(value, x + cellSize / 2, y + cellSize / 2);
   ctx.restore();
 }
-
+// Bounce easing function (easeOutBounce)
+function easeOutBounce(t) {
+    if (t < (1 / 2.75)) {
+      return 7.5625 * t * t;
+    } else if (t < (2 / 2.75)) {
+      t -= 1.5 / 2.75;
+      return 7.5625 * t * t + 0.75;
+    } else if (t < (2.5 / 2.75)) {
+      t -= 2.25 / 2.75;
+      return 7.5625 * t * t + 0.9375;
+    } else {
+      t -= 2.625 / 2.75;
+      return 7.5625 * t * t + 0.984375;
+    }
+  }
+  
 /**
- * Animate removed apples with a drop animation.
- * Instead of fading, apples drop vertically.
+ * Animate removed apples with an arc animation.
+ * Apples fly up and sideways in a parabolic arc.
  */
 function drawDroppedApples() {
-  const now = performance.now();
-  for (let i = removingApples.length - 1; i >= 0; i--) {
-    const apple = removingApples[i];
-    const elapsed = now - apple.startTime;
-    if (elapsed >= apple.duration) {
-      removingApples.splice(i, 1);
-    } else {
+    const now = performance.now();
+    for (let i = removingApples.length - 1; i >= 0; i--) {
+      const apple = removingApples[i];
+      const elapsed = now - apple.startTime;
+      if (elapsed >= apple.duration) {
+        removingApples.splice(i, 1);
+        continue;
+      }
       let progress = elapsed / apple.duration;
-      // Compute drop: apple moves downward by dropDistance
-      let dropDistance = apple.dropDistance;
-      let drop = dropDistance * progress;
-      let x = offsetX + apple.col * cellSize;
-      // Original y plus drop offset
-      let y = offsetY + apple.row * cellSize + drop;
+      let origX = offsetX + apple.col * cellSize;
+      let origY = offsetY + apple.row * cellSize;
+      
+      // Horizontal movement: linear
+      let sideOffset = apple.arcSide * apple.direction * progress;
+      let x = origX + sideOffset;
+      
+      let y;
+      if (progress <= 0.5) {
+        // Upward phase: from origY to origY - apple.arcPeak
+        let p = progress / 0.5; // normalize to [0,1]
+        y = origY - apple.arcPeak * easeOutCubic(p);
+      } else {
+        // Fall phase: from (origY - apple.arcPeak) to off-screen (canvas.height + 50)
+        let p = (progress - 0.5) / 0.5; // normalize to [0,1]
+        let startYPos = origY - apple.arcPeak;
+        let endYPos = canvas.height + 50;
+        y = startYPos + easeInCubic(p) * (endYPos - startYPos);
+      }
+      
       drawApple(x, y, apple.value, 1.0, 1.0);
     }
   }
-}
+  
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+  
+  function easeInCubic(t) {
+    return t * t * t;
+  }
+  
 
 /**
  * Draw the selection rectangle.
  */
 function drawSelectionRect() {
-  const selX = Math.min(startX, currentX);
-  const selY = Math.min(startY, currentY);
-  const selW = Math.abs(startX - currentX);
-  const selH = Math.abs(startY - currentY);
-  ctx.strokeStyle = "blue";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(selX, selY, selW, selH);
-}
-
+    const selX = Math.min(startX, currentX);
+    const selY = Math.min(startY, currentY);
+    const selW = Math.abs(startX - currentX);
+    const selH = Math.abs(startY - currentY);
+  
+    // Calculate sum for the selected area
+    let sum = 0;
+    const rows = grid.length;
+    const cols = grid[0].length;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        let x = offsetX + c * cellSize;
+        let y = offsetY + r * cellSize;
+        const overlapArea = getRectOverlap(selX, selY, selW, selH, x, y, cellSize, cellSize);
+        const cellArea = cellSize * cellSize;
+        if (overlapArea >= cellArea / 2) {
+          sum += grid[r][c];
+        }
+      }
+    }
+  
+    // If sum is exactly 10, use a dimmed style
+    if (sum === 10) {
+      // Draw a semi-transparent fill to "dim" the selection box
+      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+      ctx.fillRect(selX, selY, selW, selH);
+      // And a thicker, darker border
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+      ctx.lineWidth = 3;
+    } else {
+      ctx.strokeStyle = "blue";
+      ctx.lineWidth = 2;
+    }
+    
+    ctx.strokeRect(selX, selY, selW, selH);
+  }
+  
+  
 /**
  * Finalize selection and emit selected cells to the server.
  */
@@ -279,7 +356,6 @@ function finalizeSelection() {
   
   const rows = grid.length;
   const cols = grid[0].length;
-  
   let selectedCells = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -306,29 +382,37 @@ socket.on("gameState", (data) => {
 });
 
 socket.on("selectionSuccess", (data) => {
-  const { removed, playerId, newScore } = data;
-  players[playerId].score = newScore;
-  if (playerId === socket.id) {
-    myScore = newScore;
-    myScoreElem.textContent = myScore;
-  }
-  // Instead of fade-out, use drop animation.
-  removed.forEach(({ row, col }) => {
-    let oldValue = grid[row][col];
-    if (oldValue < 1) oldValue = 1;
-    // Push drop animation object with a dropDistance (e.g., 50px)
-    removingApples.push({
-      row,
-      col,
-      value: oldValue,
-      startTime: performance.now(),
-      duration: 500,
-      dropDistance: 50
+    const { removed, playerId, newScore } = data;
+    players[playerId].score = newScore;
+    if (playerId === socket.id) {
+      myScore = newScore;
+      myScoreElem.textContent = myScore;
+    }
+    
+    removed.forEach(({ row, col }) => {
+      let oldValue = grid[row][col];
+      if (oldValue < 1) oldValue = 1;
+      let dir = Math.random() < 0.5 ? -1 : 1;
+      // Randomize arcPeak between, say, 100 and 200 pixels.
+      let randomArcPeak = 100 + Math.random() * 100;
+      // Optionally randomize arcSide as well (e.g., between 80 and 120 pixels)
+      let randomArcSide = 80 + Math.random() * 40;
+      
+      removingApples.push({
+        row,
+        col,
+        value: oldValue,
+        startTime: performance.now(),
+        duration: 600,    // duration in milliseconds
+        arcPeak: randomArcPeak,
+        arcSide: randomArcSide,
+        direction: dir
+      });
+      grid[row][col] = 0;
     });
-    grid[row][col] = 0;
+    
+    updateScoreboard();
   });
-  updateScoreboard();
-});
 
 socket.on("selectionFail", (data) => {
   console.log("Selection failed:", data.reason);
@@ -340,16 +424,27 @@ socket.on("timerUpdate", (data) => {
 
 socket.on("gameOver", (data) => {
   console.log("Game Over! Final Scores:", data.players);
+  
+  // Determine winner from players object
+  let winnerId = null;
+  for (let pid in data.players) {
+    if (!winnerId || data.players[pid].score > data.players[winnerId].score) {
+      winnerId = pid;
+    }
+  }
+  let winnerName = players[winnerId] && players[winnerId].nickname ? players[winnerId].nickname : (playerNames[winnerId] || "Unknown");
+  let winnerScore = data.players[winnerId].score;
+  
   const modal = document.getElementById("gameOverModal");
   const finalScoreElem = document.getElementById("finalScore");
-  finalScoreElem.innerText = `Your Score: ${myScore}`;
+  finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${winnerName} (${winnerScore})`;
   modal.style.display = "flex";
+  
   updateScoreboard();
 });
 
 // --- Remote Cursor Handling ---
 socket.on("updateCursor", (data) => {
-  // Data: { playerId, x, y, isDragging, selection }
   remoteCursors[data.playerId] = data;
 });
 socket.on("removeCursor", (data) => {
@@ -370,58 +465,97 @@ function emitCursor() {
 // Background Music and Sound Effects
 // ----------------------------------------------------
 const popSound = new Audio("pop.mp3");
-const bgm = new Audio("boss.mp3");
-const bgm2 = new Audio("oia.m4a");
-const bgm3 = new Audio("chill.m4a");
-const bgm4 = new Audio("anime.m4a");
-bgm.loop = true;
-bgm.volume = 0.5; // adjust volume if needed
-bgm2.loop = true;
-bgm2.volume = 0.5; // adjust volume if needed
-bgm3.loop = true;
-bgm3.volume = 0.5; // adjust volume if needed
-bgm4.loop = true;
-bgm4.volume = 0.5; // adjust volume if needed
-// Play pop sound on selection success
+const bgmBoss = new Audio("boss.mp3");
+const bgmOIA = new Audio("oia.m4a");
+const bgmChill = new Audio("chill.m4a");
+const bgmAnime = new Audio("anime.m4a");
+
+const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
+bgmTracks.forEach(track => {
+  track.loop = true;
+  track.volume = parseFloat(document.getElementById("bgmVolume").value);
+});
+
+// Play pop sound on selection success and set its volume from popVolume slider
 socket.on("selectionSuccess", (data) => {
   popSound.currentTime = 0;
+  popSound.volume = parseFloat(document.getElementById("popVolume").value);
   popSound.play();
 });
 
-// BGM toggle
-document.getElementById("bgmToggle").addEventListener("change", (e) => {
+// BGM toggles
+document.getElementById("bgmToggleBoss").addEventListener("change", (e) => {
   if (e.target.checked) {
-    bgm.play();
+    bgmBoss.play();
   } else {
-    bgm.pause();
+    bgmBoss.pause();
   }
 });
-document.getElementById("bgm2Toggle").addEventListener("change", (e) => {
-    if (e.target.checked) {
-      bgm2.play();
-    } else {
-      bgm2.pause();
-    }
-  });
-  document.getElementById("bgm3Toggle").addEventListener("change", (e) => {
-    if (e.target.checked) {
-      bgm3.play();
-    } else {
-      bgm3.pause();
-    }
-  });
-  document.getElementById("bgm4Toggle").addEventListener("change", (e) => {
-    if (e.target.checked) {
-      bgm4.play();
-    } else {
-      bgm4.pause();
-    }
-  });
+document.getElementById("bgmToggleOIA").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    bgmOIA.play();
+  } else {
+    bgmOIA.pause();
+  }
+});
+document.getElementById("bgmToggleChill").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    bgmChill.play();
+  } else {
+    bgmChill.pause();
+  }
+});
+document.getElementById("bgmToggleAnime").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    bgmAnime.play();
+  } else {
+    bgmAnime.pause();
+  }
+});
+
+// BGM volume control
+document.getElementById("bgmVolume").addEventListener("input", (e) => {
+  const vol = parseFloat(e.target.value);
+  bgmTracks.forEach(track => track.volume = vol);
+});
+
+// Pop sound volume control
+document.getElementById("popVolume").addEventListener("input", (e) => {
+  const vol = parseFloat(e.target.value);
+  popSound.volume = vol;
+});
+
+// ----------------------------------------------------
+// Nickname Modal Handling
+// ----------------------------------------------------
+const nicknameModal = document.getElementById("nicknameModal");
+const nicknameInput = document.getElementById("nicknameInput");
+const nicknameSubmit = document.getElementById("nicknameSubmit");
+
+// When the nickname is submitted, send it to the server and hide the modal.
+nicknameSubmit.addEventListener("click", () => {
+  const nickname = nicknameInput.value.trim();
+  if (nickname === "") {
+    alert("Please enter a nickname.");
+    return;
+  }
+  myNickname = nickname;
+  // Emit setNickname event to server
+  socket.emit("setNickname", { nickname });
+  // Also store locally
+  playerNames[socket.id] = nickname;
+  // Hide the modal
+  nicknameModal.style.display = "none";
+});
+
+// Optionally, prevent closing the modal without entering a nickname
+window.addEventListener("load", () => {
+  nicknameModal.style.display = "flex";
+});
+
 // ----------------------------------------------------
 // Mouse & UI Setup
 // ----------------------------------------------------
-
-// Attach mouse events to the canvas
 canvas.addEventListener("mousedown", (e) => {
   isDragging = true;
   const rect = canvas.getBoundingClientRect();
@@ -441,7 +575,8 @@ canvas.addEventListener("mousemove", (e) => {
   }
 });
 
-canvas.addEventListener("mouseup", (e) => {
+// Global mouseup: if released outside the canvas, end drag.
+window.addEventListener("mouseup", (e) => {
   if (isDragging) {
     isDragging = false;
     finalizeSelection();
@@ -454,17 +589,17 @@ document.getElementById("resetButton").addEventListener("click", () => {
   socket.emit("restartGame");
 });
 
-// Optional toggles (Light Colors already handled below)
+// Optional toggle for Light Colors
 document.getElementById("lightColors").addEventListener("change", (e) => {
   console.log("Light Colors toggled:", e.target.checked);
 });
 
-// Close modal
+// Close modal (for game over)
 document.getElementById("closeModal").addEventListener("click", () => {
   document.getElementById("gameOverModal").style.display = "none";
 });
 
-// Start loop
+// Start animation loop
 autoScaleGrid();
 requestAnimationFrame(drawGame);
 <!DOCTYPE html>
@@ -475,8 +610,18 @@ requestAnimationFrame(drawGame);
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Nickname Modal -->
+  <div id="nicknameModal" class="modal" style="display: flex;">
+    <div class="modal-content">
+      <h2>Enter Your Nickname</h2>
+      <input type="text" id="nicknameInput" placeholder="Nickname" />
+      <button id="nicknameSubmit">Join Game</button>
+    </div>
+  </div>
+
   <div id="frame">
     <div id="gameContainer">
+          
       <!-- Larger canvas for extra space -->
       <canvas id="gameCanvas" width="1200" height="1000"></canvas>
       
@@ -498,10 +643,12 @@ requestAnimationFrame(drawGame);
         <button id="resetButton">Reset</button>
         <div id="toggles">
           <label><input type="checkbox" id="lightColors"> Light Colors</label>
-          <label><input type="checkbox" id="bgmToggle"> Boss </label>
-          <label><input type="checkbox" id="bgm2Toggle"> OIA </label>
-          <label><input type="checkbox" id="bgm3Toggle"> Chill </label>
-          <label><input type="checkbox" id="bgm4Toggle"> Anime </label>
+          <label><input type="checkbox" id="bgmToggleBoss"> Boss</label>
+          <label><input type="checkbox" id="bgmToggleOIA"> OIA</label>
+          <label><input type="checkbox" id="bgmToggleChill"> Chill</label>
+          <label><input type="checkbox" id="bgmToggleAnime"> Anime</label>
+          <label>BGM Volume: <input type="range" id="bgmVolume" min="0" max="1" step="0.01" value="0.5"></label>
+          <label>Pop Volume: <input type="range" id="popVolume" min="0" max="1" step="0.01" value="0.5"></label>
         </div>
       </div>
     </div>
@@ -525,7 +672,14 @@ body {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
-    background-color: #66cc99; /* Light green */
+    background:
+      linear-gradient(
+        rgba(0, 0, 0, 0.7), 
+        rgba(0, 0, 0, 0.7)
+      ),
+      url(bgimg.png);
+    background-size: cover;
+    background-position: center;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -590,7 +744,7 @@ body {
     top: 100px;
     right: -240px;  /* outside the game container */
     width: 180px;
-    background-color: rgba(255, 255, 255, 0.8);
+    background-color: rgba(187, 187, 187, 0.568);
     padding: 10px;
     border-radius: 5px;
     font-size: 16px;
@@ -652,6 +806,66 @@ body {
     text-align: center;
     box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
   }
+/* Nickname Modal Overlay */
+#nicknameModal {
+    position: fixed;
+    z-index: 9999; /* Make sure it's above everything else */
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7); /* Dark overlay */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* The white modal box itself */
+  #nicknameModal .modal-content {
+    background: #fff;
+    padding: 30px 40px; /* More horizontal padding */
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    max-width: 400px;
+    width: 90%;
+    box-sizing: border-box;
+  }
+  
+  
+  /* Title in the modal */
+  #nicknameModal .modal-content h2 {
+    margin-top: 0;
+    font-size: 24px;
+    color: #333;
+  }
+  
+  /* Text input styling */
+  #nicknameModal input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    margin: 20px 0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 16px;
+    box-sizing: border-box;
+  }
+  
+  #nicknameModal button {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    background: #33a644;
+    border: none;
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+  }
+  
+  #nicknameModal button:hover {
+    background: #2a8a3a;
+  }
   const express = require("express");
   const http = require("http");
   const socketIO = require("socket.io");
@@ -669,50 +883,65 @@ body {
   // Global game state
   let grid = [];
   let players = {};
-  let gameDuration = 60; // seconds
+  let gameDuration = 120; // seconds
   let gameActive = false;
   let timerInterval;
   
   // Global object to track players' cursors
   let playerCursors = {};
   
-  /** Shuffle array (Fisher-Yates). */
-  function shuffleArray(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
-  }
-  
   /**
-   * Create a grid with an even distribution of numbers 1..9,
-   * then shuffle for better solvability.
+   * Shuffle array (Fisher-Yates).
    */
-  function createGrid(rows = GRID_ROWS, cols = GRID_COLS) {
-    const totalCells = rows * cols;
-    let numbers = [];
-    const countEach = Math.floor(totalCells / 9);
-    for (let n = 1; n <= 9; n++) {
-      for (let i = 0; i < countEach; i++) {
+  function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+    
+    /**
+     * Create a uniform board where each digit from 1 to 9 appears roughly equally.
+     * This ensures that complementary pairs (e.g., 1 & 9, 2 & 8, etc.) occur with similar frequency.
+     */
+    function createGrid(rows = GRID_ROWS, cols = GRID_COLS) {
+      const totalCells = rows * cols;
+      let numbers = [];
+      // Compute base count for each digit
+      let baseCount = Math.floor(totalCells / 9);
+      
+      // Add each number (1..9) exactly baseCount times
+      for (let n = 1; n <= 9; n++) {
+        for (let i = 0; i < baseCount; i++) {
+          numbers.push(n);
+        }
+      }
+      
+      // Fill any remaining cells (if totalCells is not divisible by 9) 
+      let remainder = totalCells - numbers.length;
+      let n = 1;
+      while (remainder > 0) {
         numbers.push(n);
+        n = (n % 9) + 1;
+        remainder--;
       }
-    }
-    while (numbers.length < totalCells) {
-      numbers.push(Math.floor(Math.random() * 9) + 1);
-    }
-    numbers = shuffleArray(numbers);
-    let newGrid = [];
-    for (let r = 0; r < rows; r++) {
-      let row = [];
-      for (let c = 0; c < cols; c++) {
-        row.push(numbers[r * cols + c]);
+      
+      // Shuffle the numbers array to randomize placement
+      shuffleArray(numbers);
+      
+      // Build the board (2D array)
+      let board = [];
+      let idx = 0;
+      for (let r = 0; r < rows; r++) {
+        let row = [];
+        for (let c = 0; c < cols; c++) {
+          row.push(numbers[idx++]);
+        }
+        board.push(row);
       }
-      newGrid.push(row);
+      return board;
     }
-    return newGrid;
-  }
-  
   /** Start a new game: create grid, reset scores, broadcast state, start timer. */
   function startGame() {
     grid = createGrid();
@@ -727,7 +956,7 @@ body {
     timerInterval = setInterval(() => {
       timeLeft--;
       if (timeLeft <= 0) {
-        endGame();
+        gameOver();
       } else {
         io.emit("timerUpdate", { timeLeft });
       }
@@ -735,12 +964,17 @@ body {
   }
   
   /** End the current game session. */
-  function endGame() {
+  function gameOver() {
     clearInterval(timerInterval);
     gameActive = false;
     io.emit("gameOver", { players });
   }
-  
+  function endGame() {
+      clearInterval(timerInterval);
+      gameActive = false;
+      io.emit("endGame", { players });
+    }
+    
   // Socket.IO events
   io.on("connection", (socket) => {
     console.log(`New client connected: ${socket.id}`);
@@ -757,12 +991,19 @@ body {
       // Broadcast to everyone except sender
       socket.broadcast.emit("updateCursor", { playerId: socket.id, ...data });
     });
-  
+    socket.on("setNickname", (data) => {
+      if (players[socket.id]) {
+        players[socket.id].nickname = data.nickname;
+      }
+    });
+    
     // Handle apple selection
     socket.on("selectApples", (data) => {
       if (!gameActive || !data.cells) return;
+    
       let sum = 0;
       let validCells = [];
+    
       for (let cell of data.cells) {
         const { row, col } = cell;
         if (grid[row] && grid[row][col] && grid[row][col] > 0) {
@@ -770,11 +1011,18 @@ body {
           validCells.push({ row, col });
         }
       }
+    
       if (sum === 10 && validCells.length > 0) {
+        // ✅ NEW SCORING LOGIC BASED ON LENGTH
+        const comboLength = validCells.length;
+        const scoreGained = calculateScore(comboLength);
+    
         validCells.forEach(({ row, col }) => {
           grid[row][col] = 0;
         });
-        players[socket.id].score += 1;
+    
+        players[socket.id].score += scoreGained;
+    
         io.emit("selectionSuccess", {
           removed: validCells,
           playerId: socket.id,
@@ -786,6 +1034,11 @@ body {
         });
       }
     });
+    
+    // Scoring helper (feel free to tweak)
+    function calculateScore(length) {
+      return Math.floor((length * (length + 1)) / 2); // Triangular number logic
+    }
   
     // Restart game
     socket.on("restartGame", () => {

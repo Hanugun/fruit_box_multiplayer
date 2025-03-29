@@ -123,12 +123,19 @@ io.on("connection", (socket) => {
     // Broadcast to everyone except sender
     socket.broadcast.emit("updateCursor", { playerId: socket.id, ...data });
   });
-
+  socket.on("setNickname", (data) => {
+    if (players[socket.id]) {
+      players[socket.id].nickname = data.nickname;
+    }
+  });
+  
   // Handle apple selection
   socket.on("selectApples", (data) => {
     if (!gameActive || !data.cells) return;
+  
     let sum = 0;
     let validCells = [];
+  
     for (let cell of data.cells) {
       const { row, col } = cell;
       if (grid[row] && grid[row][col] && grid[row][col] > 0) {
@@ -136,11 +143,18 @@ io.on("connection", (socket) => {
         validCells.push({ row, col });
       }
     }
+  
     if (sum === 10 && validCells.length > 0) {
+      // ✅ NEW SCORING LOGIC BASED ON LENGTH
+      const comboLength = validCells.length;
+      const scoreGained = calculateScore(comboLength);
+  
       validCells.forEach(({ row, col }) => {
         grid[row][col] = 0;
       });
-      players[socket.id].score += validCells.length;
+  
+      players[socket.id].score += scoreGained;
+  
       io.emit("selectionSuccess", {
         removed: validCells,
         playerId: socket.id,
@@ -152,6 +166,11 @@ io.on("connection", (socket) => {
       });
     }
   });
+  
+  // Scoring helper (feel free to tweak)
+  function calculateScore(length) {
+    return Math.floor((length * (length + 1)) / 2); // Triangular number logic
+  }
 
   // Restart game
   socket.on("restartGame", () => {
