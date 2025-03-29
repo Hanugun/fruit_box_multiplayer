@@ -1,200 +1,226 @@
-/* Body background */
 body {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
-    background:
-      linear-gradient(
-        rgba(0, 0, 0, 0.7), 
-        rgba(0, 0, 0, 0.7)
-      ),
-      url(bgimg.png);
+    background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url(bgimg.png);
     background-size: cover;
     background-position: center;
+    height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
   }
   
-  /* Outer green frame */
-  #frame {
-    background-color: #58b666;
+  .modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  
+  .modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 10px;
+    text-align: center;
+    min-width: 300px;
+  }
+  
+  .modal-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    margin: 0.5rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  
+  .modal-btn:hover {
+    background: #2980b9;
+  }
+  
+  #gameContainer {
+    position: relative;
+    width: 1220px;
+    height: 1020px;
+    background: #c9f2d3;
     border: 6px solid #33a644;
     border-radius: 10px;
     padding: 10px;
+    display: none;
   }
   
-  /* Main container for the game */
-  #gameContainer {
-    position: relative;
-    background-color: #c9f2d3;
-    width: 1220px;  /* slightly bigger than the 1200x1000 canvas */
-    height: 1020px;
-    box-shadow: inset 0 0 0 2px #b2e6be;
-  }
-  
-  /* The grid canvas */
   #gameCanvas {
     position: absolute;
     left: 10px;
     top: 10px;
-    background-color: #daf7e2;
-    box-shadow: inset 0 0 0 1px #b2e6be;
+    background: #daf7e2;
+    border: 1px solid #b2e6be;
   }
   
-  /* Score display in top-right */
-  #scoreDisplay {
-    position: absolute;
-    top: 10px;
-    right: 20px;
-    font-size: 20px;
-    color: #fff;
-    background-color: #33a644;
-    padding: 5px 10px;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  }
-  
-  /* Timer in top-left */
-  #timerDisplay {
-    position: absolute;
-    top: 10px;
-    left: 20px;
-    font-size: 18px;
-    color: #fff;
-    background-color: #33a644;
-    padding: 5px 10px;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  }
-  
-  /* Scoreboard on the right */
   #scoreboard {
     position: absolute;
     top: 100px;
-    right: -240px;  /* outside the game container */
+    right: -240px;
     width: 180px;
-    background-color: rgba(187, 187, 187, 0.568);
+    background: rgba(187,187,187,0.57);
     padding: 10px;
     border-radius: 5px;
-    font-size: 16px;
-    color: #333;
     box-shadow: 0 2px 5px rgba(0,0,0,0.3);
   }
   
-  /* Bottom bar */
+  #waitOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 24px;
+    z-index: 100;
+  }
+  
+  .spectator {
+    opacity: 0.5;
+    filter: grayscale(50%);
+  }
+  
   #bottomBar {
     position: absolute;
     bottom: 10px;
     left: 10px;
     right: 10px;
-    height: 40px;
+    height: 50px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-  
-  /* Reset button */
-  #resetButton {
-    font-size: 16px;
-    padding: 5px 10px;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 10px;
+    padding: 0 15px;
     border: 2px solid #33a644;
-    background-color: #c9f2d3;
-    color: #33a644;
-    border-radius: 4px;
+  }
+  #resetButton {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 5px;
     cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s;
   }
   #resetButton:hover {
-    background-color: #b2e6be;
+    background: #c0392b;
+    transform: scale(1.05);
   }
-  
-  /* Toggles (Light Colors, BGM) */
   #toggles {
-    font-size: 14px;
-    color: #33a644;
-  }
-  
-  /* Modal overlay */
-  .modal {
-    position: fixed;
-    z-index: 100;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    display: none;
-    justify-content: center;
-    align-items: center;
-  }
-  
-  /* Modal content */
-  .modal-content {
-    background: #fff;
-    padding: 20px 30px;
-    border-radius: 5px;
-    text-align: center;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
-  }
-/* Nickname Modal Overlay */
-#nicknameModal {
-    position: fixed;
-    z-index: 9999; /* Make sure it's above everything else */
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7); /* Dark overlay */
     display: flex;
-    justify-content: center;
     align-items: center;
+    gap: 15px;
   }
   
-  /* The white modal box itself */
-  #nicknameModal .modal-content {
-    background: #fff;
-    padding: 30px 40px; /* More horizontal padding */
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    text-align: center;
-    max-width: 400px;
-    width: 90%;
-    box-sizing: border-box;
+  #toggles label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
   }
-  
-  
-  /* Title in the modal */
-  #nicknameModal .modal-content h2 {
-    margin-top: 0;
-    font-size: 24px;
+  #timer, #score {
+    font-weight: bold;
     color: #333;
   }
   
-  /* Text input styling */
-  #nicknameModal input[type="text"] {
-    width: 100%;
-    padding: 10px;
-    margin: 20px 0;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 16px;
-    box-sizing: border-box;
+  #timer { left: 20px; }
+  #score { right: 20px; }
+  
+  input[type="range"] {
+    vertical-align: middle;
+    margin: 0 10px;
+  }
+  /* Add these styles */
+  #gameInfo {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 8px 20px;
+    border-radius: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    border: 2px solid #33a644;
+    gap: 30px; /* Adds consistent spacing between elements */
+    align-items: center;
+    font-family: Arial, sans-serif;
+    z-index: 10;
   }
   
-  #nicknameModal button {
-    width: 100%;
-    padding: 10px;
-    font-size: 16px;
-    background: #33a644;
-    border: none;
-    color: #fff;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.3s ease;
+  #gameInfo > div {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap; /* Prevents text from wrapping */
   }
   
-  #nicknameModal button:hover {
-    background: #2a8a3a;
+  
+  #roomCodeDisplayInGame {
+    color: #e74c3c;
+    font-weight: bold;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.1);
+    font-size: 1.1em;
   }
   
+  #timeLeft, #yourScore {
+    font-weight: bold;
+    color: #2980b9;
+  }
+  #gameOverModal .modal-content {
+    background: #f8f9fa;
+    border: 3px solid #33a644;
+    border-radius: 15px;
+    padding: 30px;
+    min-width: 400px;
+    text-align: center;
+  }
+  
+  #gameOverModal h2 {
+    color: #e74c3c;
+    margin-bottom: 20px;
+  }
+  
+  #gameOverModal .modal-btn {
+    margin: 10px;
+  }
+  #finalScore {
+    font-size: 18px;
+    margin-bottom: 25px;
+    line-height: 1.6;
+  }
+  
+  #playAgainBtn {
+    background: #2ecc71;
+  }
+  
+  #quitBtn {
+    background: #e74c3c;
+  }
+  
+  #playAgainBtn:hover {
+    background: #27ae60;
+  }
+  
+  #quitBtn:hover {
+    background: #c0392b;
+  }

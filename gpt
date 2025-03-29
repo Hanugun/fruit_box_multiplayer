@@ -1,82 +1,296 @@
 const socket = io();
-
-// Global variable for player's chosen nickname.
 let myNickname = "";
+let currentRoom = "";
+let isHost = false;
+let gameActive = false;
 
-// Grid data
+// Game state variables
 let grid = [];
 let players = {};
 let myScore = 0;
+// Add this near the top with other DOM elements
+const roomCodeDisplayElem = document.getElementById("roomCodeDisplay");
+const resetButton = document.getElementById("resetButton");
+const quitButton = document.createElement("button"); // We'll add this dynamically
+// DOM elements
+const timeLeftElem = document.getElementById("timeLeft");
+const myScoreElem = document.getElementById("yourScore");
+const scoreboardDiv = document.getElementById("scoreboard");
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
-// References
-let timeLeftElem = document.getElementById("timeLeft");
-let myScoreElem = document.getElementById("yourScore");
-let scoreboardDiv = document.getElementById("scoreboard");
-
-// Canvas
-let canvas = document.getElementById("gameCanvas");
-let ctx = canvas.getContext("2d");
-
-// For auto-scaling & centering the grid
+// Grid sizing
 let cellSize = 50;
 let offsetX = 0;
 let offsetY = 0;
-let margin = 50; // margin inside the canvas
+const margin = 50;
 
-// Drag selection
+// Selection state
 let isDragging = false;
 let startX = 0, startY = 0;
 let currentX = 0, currentY = 0;
 
-// Drop animation (apples drop with arc)
-let removingApples = []; // Each: { row, col, value, startTime, duration, arcPeak, arcSide, direction }
-
-// Remote cursors
+// Animation
+let removingApples = [];
 let remoteCursors = {};
-
-// For assigning player names (fallback if server has no nickname)
 let playerNames = {};
 let nextPlayerNumber = 1;
 
-/**
- * Returns a unique color for a player based on their ID.
- */
-function getPlayerColor(playerId) {
-  const colors = [
-    "#FF0000", // bright red
-    "#FF9900", // bright orange
-    "#FFFF00", // bright yellow
-    "#00FF00", // bright lime green
-    "#00FFFF", // bright cyan
-    "#FF00FF", // bright magenta
-    "#FFFFFF", // white
-    "#FFD700"  // gold
-  ];
-  let hash = 0;
-  for (let i = 0; i < playerId.length; i++) {
-    hash = playerId.charCodeAt(i) + ((hash << 5) - hash);
+// Sound effects
+const popSound = new Audio("pop.mp3");
+const bgmBoss = new Audio("boss.mp3");
+const bgmOIA = new Audio("oia.m4a");
+const bgmChill = new Audio("chill.m4a");
+const bgmAnime = new Audio("anime.m4a");
+const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
+
+// Modals
+const modals = {
+  initial: document.getElementById("initialModal"),
+  create: document.getElementById("createRoomModal"),
+  join: document.getElementById("joinRoomModal"),
+  lobby: document.getElementById("lobbyModal"),
+  gameOver: document.getElementById("gameOverModal")
+};
+
+// Initialize sound
+bgmTracks.forEach(track => {
+  track.loop = true;
+  track.volume = parseFloat(document.getElementById("bgmVolume").value);
+});
+
+// Event listeners
+document.getElementById("createRoomBtn").addEventListener("click", () => {
+  modals.initial.style.display = "none";
+  modals.create.style.display = "flex";
+});
+
+document.getElementById("confirmCreateRoom").addEventListener("click", () => {
+  const nickname = document.getElementById("createNickname").value.trim();
+  const maxPlayers = parseInt(document.getElementById("maxPlayers").value);
+  if (!nickname || maxPlayers < 1 || maxPlayers > 5) {
+    alert("Please enter a valid nickname and player count (1-5)");
+    return;
   }
-  const index = Math.abs(hash) % colors.length;
-  return colors[index];
-}
+  
+  myNickname = nickname;
+  socket.emit("createRoom", { maxPlayers, nickname });
+});
 
-/**
- * Utility: Calculate overlap area between two rectangles.
- */
-function getRectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-  const overlapX = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
-  const overlapY = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
-  return overlapX * overlapY;
-}
+document.getElementById("joinExistingBtn").addEventListener("click", () => {
+  modals.initial.style.display = "none";
+  modals.join.style.display = "flex";
+});
 
-/**
- * Scale & center the grid in the canvas, leaving a margin.
- */
+document.getElementById("confirmJoinRoom").addEventListener("click", () => {
+  const nickname = document.getElementById("joinNickname").value.trim();
+  const roomCode = document.getElementById("joinRoomCode").value.trim().toUpperCase();
+  
+  if (!nickname || !roomCode) {
+    alert("Please enter both nickname and room code");
+    return;
+  }
+  
+  myNickname = nickname;
+  socket.emit("joinRoom", { roomCode, nickname });
+  modals.join.style.display = "none";
+});
+
+socket.on("roomJoined", ({ roomCode, players }) => {
+    currentRoom = roomCode;
+    isHost = false;
+    roomCodeDisplayElem.textContent = roomCode;
+    updateRoomCodeDisplay();
+  document.getElementById("roomCodeDisplay").textContent = roomCode;
+  modals.lobby.style.display = "flex";
+  updatePlayerList(players);
+});
+
+document.getElementById("startGameBtn").addEventListener("click", () => {
+  socket.emit("startGame");
+});
+
+document.getElementById("closeModal").addEventListener("click", () => {
+  modals.gameOver.style.display = "none";
+});
+
+// Sound controls
+document.getElementById("bgmToggleBoss").addEventListener("change", (e) => {
+  e.target.checked ? bgmBoss.play() : bgmBoss.pause();
+});
+document.getElementById("bgmToggleOIA").addEventListener("change", (e) => {
+  e.target.checked ? bgmOIA.play() : bgmOIA.pause();
+});
+document.getElementById("bgmToggleChill").addEventListener("change", (e) => {
+  e.target.checked ? bgmChill.play() : bgmChill.pause();
+});
+document.getElementById("bgmToggleAnime").addEventListener("change", (e) => {
+  e.target.checked ? bgmAnime.play() : bgmAnime.pause();
+});
+document.getElementById("bgmVolume").addEventListener("input", (e) => {
+  const vol = parseFloat(e.target.value);
+  bgmTracks.forEach(track => track.volume = vol);
+});
+document.getElementById("popVolume").addEventListener("input", (e) => {
+  popSound.volume = parseFloat(e.target.value);
+});
+
+// Socket event handlers
+socket.on("roomCreated", ({ roomCode, players }) => {
+    currentRoom = roomCode;
+    isHost = true;
+    roomCodeDisplayElem.textContent = roomCode;
+    updateRoomCodeDisplay();
+  document.getElementById("roomCodeDisplay").textContent = roomCode;
+  modals.create.style.display = "none";
+  modals.lobby.style.display = "flex";
+  updatePlayerList(players);
+});
+
+socket.on("playerJoined", (players) => {
+  updatePlayerList(players);
+  if (isHost) {
+    document.getElementById("startGameBtn").disabled = players.length < 1;
+  }
+});
+
+socket.on("gameStarted", (gameState) => {
+  gameActive = true;
+  modals.lobby.style.display = "none";
+  
+document.getElementById("gameInfo").style.display = "flex";
+document.getElementById("gameInfo").style.justifyContent = "space-between";
+
+  document.getElementById("gameContainer").style.display = "block";
+  document.getElementById("waitOverlay").style.display = "none";
+  canvas.classList.remove("spectator");
+  initializeGame(gameState);
+});
+
+socket.on("spectatorJoined", (gameState) => {
+  gameActive = false;
+  document.getElementById("waitOverlay").style.display = "flex";
+  canvas.classList.add("spectator");
+  initializeGame(gameState);
+});
+
+socket.on("gameState", (data) => {
+  grid = data.grid;
+  players = data.players.reduce((acc, player) => {
+    acc[player.id] = player;
+    return acc;
+  }, {});
+  autoScaleGrid();
+  updateScoreboard();
+});
+
+socket.on("selectionSuccess", (data) => {
+    const { removed, playerId, newScore } = data;
+    players[playerId].score = newScore;
+    if (playerId === socket.id) {
+      myScore = newScore;
+      myScoreElem.textContent = myScore;
+      // Only play sound for local player
+      popSound.currentTime = 0;
+      popSound.play();
+  }
+  
+  removed.forEach(({ row, col }) => {
+    let oldValue = grid[row][col];
+    if (oldValue < 1) oldValue = 1;
+    let dir = Math.random() < 0.5 ? -1 : 1;
+    let randomArcPeak = 100 + Math.random() * 100;
+    let randomArcSide = 80 + Math.random() * 40;
+    
+    removingApples.push({
+      row,
+      col,
+      value: oldValue,
+      startTime: performance.now(),
+      duration: 600,
+      arcPeak: randomArcPeak,
+      arcSide: randomArcSide,
+      direction: dir
+    });
+    grid[row][col] = 0;
+  });
+  
+  updateScoreboard();
+});
+
+socket.on("selectionFail", (data) => {
+  console.log("Selection failed:", data.reason);
+});
+
+socket.on("timerUpdate", (data) => {
+  timeLeftElem.textContent = data.timeLeft;
+});
+
+socket.on("gameOver", (data) => {
+    const gameOverModalContent = document.querySelector("#gameOverModal .modal-content");
+    if (!document.getElementById("playAgainBtn")) {
+      const playAgainBtn = document.createElement("button");
+      playAgainBtn.id = "playAgainBtn";
+      playAgainBtn.textContent = "Play Again";
+      playAgainBtn.className = "modal-btn";
+      playAgainBtn.addEventListener("click", () => {
+        if (isHost) {
+          socket.emit("startGame");
+        }
+        modals.gameOver.style.display = "none";
+      });
+      gameOverModalContent.appendChild(playAgainBtn);
+      
+      quitButton.id = "quitBtn";
+      quitButton.textContent = "Quit";
+      quitButton.className = "modal-btn";
+      quitButton.addEventListener("click", () => {
+        socket.disconnect();
+        window.location.reload();
+      });
+      gameOverModalContent.appendChild(quitButton);
+    }
+});
+// Reset button functionality
+resetButton.addEventListener("click", () => {
+    if (isHost) {
+      socket.emit("startGame");
+    }
+  });
+  
+  // Update the room code display position
+  function updateRoomCodeDisplay() {
+    const gameInfo = document.getElementById("gameInfo");
+    const roomCodeSpan = document.createElement("span");
+    roomCodeSpan.id = "roomCodeDisplayInGame";
+    roomCodeSpan.textContent = currentRoom;
+    roomCodeSpan.style.margin = "0 auto";
+    
+    // Clear any existing room code display
+    const existing = document.getElementById("roomCodeDisplayInGame");
+    if (existing) existing.remove();
+    
+    gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
+  }
+  
+socket.on("updateCursor", (data) => {
+  remoteCursors[data.playerId] = data;
+});
+
+socket.on("removeCursor", (data) => {
+  delete remoteCursors[data.playerId];
+});
+
+socket.on("roomError", (message) => {
+  alert(`Room Error: ${message}`);
+});
+
+// Game functions
 function autoScaleGrid() {
   if (!grid || grid.length === 0) return;
+  
   const rows = grid.length;
   const cols = grid[0].length;
-  
   const availableWidth = canvas.width - margin * 2;
   const availableHeight = canvas.height - margin * 2;
   
@@ -90,14 +304,9 @@ function autoScaleGrid() {
   offsetY = margin + (availableHeight - gridHeight) / 2;
 }
 
-/**
- * Update scoreboard with player names and scores.
- * If a player's nickname is set (from server), use that.
- */
 function updateScoreboard() {
   let html = "<h3>Scoreboard</h3><ul>";
   for (let pid in players) {
-    // Use nickname from server if available; otherwise fallback.
     let name = players[pid].nickname || (playerNames[pid] || ("Player " + nextPlayerNumber));
     if (!playerNames[pid] && !players[pid].nickname) {
       playerNames[pid] = "Player " + nextPlayerNumber;
@@ -109,14 +318,18 @@ function updateScoreboard() {
     html += `<li style="color: ${color};">${name}: ${score}</li>`;
   }
   html += "</ul>";
-  if (scoreboardDiv) {
-    scoreboardDiv.innerHTML = html;
-  }
+  scoreboardDiv.innerHTML = html;
 }
 
-/**
- * Main draw loop.
- */
+function getPlayerColor(playerId) {
+  const colors = ["#FF0000","#FF9900","#FFFF00","#00FF00","#00FFFF","#FF00FF","#FFFFFF","#FFD700"];
+  let hash = 0;
+  for (let i = 0; i < playerId.length; i++) {
+    hash = playerId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
 function drawGame() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
@@ -128,7 +341,7 @@ function drawGame() {
   const rows = grid.length;
   const cols = grid[0].length;
   
-  // Draw grid cell lines
+  // Draw grid
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       let x = offsetX + c * cellSize;
@@ -138,7 +351,7 @@ function drawGame() {
     }
   }
   
-  // Draw remote players' cursors and selection boxes
+  // Draw remote cursors
   for (let pid in remoteCursors) {
     let data = remoteCursors[pid];
     const color = getPlayerColor(pid);
@@ -156,39 +369,48 @@ function drawGame() {
     ctx.restore();
   }
   
-  // If dragging locally, highlight selected apples with a ring
-  if (isDragging) {
-    highlightSelectedApples();
-  }
-  
-  // Draw local apples (skip ones being removed)
+  // Draw apples
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (grid[r][c] > 0) {
-        let isRemoving = removingApples.some(a => a.row === r && a.col === c);
-        if (!isRemoving) {
-          let x = offsetX + c * cellSize;
-          let y = offsetY + r * cellSize;
-          drawApple(x, y, grid[r][c], 1.0, 1.0);
-        }
+      if (grid[r][c] > 0 && !removingApples.some(a => a.row === r && a.col === c)) {
+        let x = offsetX + c * cellSize;
+        let y = offsetY + r * cellSize;
+        drawApple(x, y, grid[r][c], 1.0, 1.0);
       }
     }
   }
   
-  // Animate dropped apples with arc animation
+  // Draw animations
   drawDroppedApples();
   
-  // Draw local selection rectangle if dragging
+  // Draw selection
   if (isDragging) {
+    highlightSelectedApples();
     drawSelectionRect();
   }
   
   requestAnimationFrame(drawGame);
 }
 
-/**
- * Highlight selected apples (local) with a ring.
- */
+function drawApple(x, y, value, alpha, scale) {
+  const minRadius = 1;
+  const radius = Math.max(minRadius, (cellSize / 2 - 5) * scale);
+  
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "red";
+  ctx.beginPath();
+  ctx.arc(x + cellSize / 2, y + cellSize / 2, radius, 0, 2 * Math.PI);
+  ctx.fill();
+  
+  ctx.fillStyle = "white";
+  ctx.font = `bold ${Math.floor(30 * scale)}px Arial`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(value, x + cellSize / 2, y + cellSize / 2);
+  ctx.restore();
+}
+
 function highlightSelectedApples() {
   const selX = Math.min(startX, currentX);
   const selY = Math.min(startY, currentY);
@@ -221,387 +443,173 @@ function highlightSelectedApples() {
   }
 }
 
-/**
- * Draw a single apple: red circle with bold white number.
- */
-function drawApple(x, y, value, alpha, scale) {
-  const radius = (cellSize / 2 - 5) * scale;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = "red";
-  ctx.beginPath();
-  ctx.arc(x + cellSize / 2, y + cellSize / 2, radius, 0, 2 * Math.PI);
-  ctx.fill();
-  
-  ctx.fillStyle = "white";
-  ctx.font = `bold ${Math.floor(30 * scale)}px Arial`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(value, x + cellSize / 2, y + cellSize / 2);
-  ctx.restore();
-}
-// Bounce easing function (easeOutBounce)
-function easeOutBounce(t) {
-    if (t < (1 / 2.75)) {
-      return 7.5625 * t * t;
-    } else if (t < (2 / 2.75)) {
-      t -= 1.5 / 2.75;
-      return 7.5625 * t * t + 0.75;
-    } else if (t < (2.5 / 2.75)) {
-      t -= 2.25 / 2.75;
-      return 7.5625 * t * t + 0.9375;
-    } else {
-      t -= 2.625 / 2.75;
-      return 7.5625 * t * t + 0.984375;
-    }
-  }
-  
-/**
- * Animate removed apples with an arc animation.
- * Apples fly up and sideways in a parabolic arc.
- */
 function drawDroppedApples() {
-    const now = performance.now();
-    for (let i = removingApples.length - 1; i >= 0; i--) {
-      const apple = removingApples[i];
-      const elapsed = now - apple.startTime;
-      if (elapsed >= apple.duration) {
-        removingApples.splice(i, 1);
-        continue;
-      }
-      let progress = elapsed / apple.duration;
-      let origX = offsetX + apple.col * cellSize;
-      let origY = offsetY + apple.row * cellSize;
-      
-      // Horizontal movement: linear
-      let sideOffset = apple.arcSide * apple.direction * progress;
-      let x = origX + sideOffset;
-      
-      let y;
-      if (progress <= 0.5) {
-        // Upward phase: from origY to origY - apple.arcPeak
-        let p = progress / 0.5; // normalize to [0,1]
-        y = origY - apple.arcPeak * easeOutCubic(p);
-      } else {
-        // Fall phase: from (origY - apple.arcPeak) to off-screen (canvas.height + 50)
-        let p = (progress - 0.5) / 0.5; // normalize to [0,1]
-        let startYPos = origY - apple.arcPeak;
-        let endYPos = canvas.height + 50;
-        y = startYPos + easeInCubic(p) * (endYPos - startYPos);
-      }
-      
-      drawApple(x, y, apple.value, 1.0, 1.0);
-    }
-  }
-  
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
-  
-  function easeInCubic(t) {
-    return t * t * t;
-  }
-  
-
-/**
- * Draw the selection rectangle.
- */
-function drawSelectionRect() {
-    const selX = Math.min(startX, currentX);
-    const selY = Math.min(startY, currentY);
-    const selW = Math.abs(startX - currentX);
-    const selH = Math.abs(startY - currentY);
-  
-    // Calculate sum for the selected area
-    let sum = 0;
-    const rows = grid.length;
-    const cols = grid[0].length;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        let x = offsetX + c * cellSize;
-        let y = offsetY + r * cellSize;
-        const overlapArea = getRectOverlap(selX, selY, selW, selH, x, y, cellSize, cellSize);
-        const cellArea = cellSize * cellSize;
-        if (overlapArea >= cellArea / 2) {
-          sum += grid[r][c];
-        }
-      }
-    }
-  
-    // If sum is exactly 10, use a dimmed style
-    if (sum === 10) {
-      // Draw a semi-transparent fill to "dim" the selection box
-      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-      ctx.fillRect(selX, selY, selW, selH);
-      // And a thicker, darker border
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-      ctx.lineWidth = 3;
-    } else {
-      ctx.strokeStyle = "blue";
-      ctx.lineWidth = 2;
+  const now = performance.now();
+  for (let i = removingApples.length - 1; i >= 0; i--) {
+    const apple = removingApples[i];
+    const elapsed = now - apple.startTime;
+    if (elapsed >= apple.duration) {
+      removingApples.splice(i, 1);
+      continue;
     }
     
-    ctx.strokeRect(selX, selY, selW, selH);
+    let progress = elapsed / apple.duration;
+    let origX = offsetX + apple.col * cellSize;
+    let origY = offsetY + apple.row * cellSize;
+    let sideOffset = apple.arcSide * apple.direction * progress;
+    let x = origX + sideOffset;
+    let y;
+    
+    if (progress <= 0.5) {
+      let p = progress / 0.5;
+      y = origY - apple.arcPeak * (1 - Math.pow(1 - p, 3));
+    } else {
+      let p = (progress - 0.5) / 0.5;
+      y = (origY - apple.arcPeak) + Math.pow(p, 3) * (canvas.height + 50 - (origY - apple.arcPeak));
+    }
+    
+    drawApple(x, y, apple.value, 1.0 - progress, 1.0 - progress * 0.5);
   }
-  
-  
-/**
- * Finalize selection and emit selected cells to the server.
- */
-function finalizeSelection() {
+}
+
+function drawSelectionRect() {
   const selX = Math.min(startX, currentX);
   const selY = Math.min(startY, currentY);
   const selW = Math.abs(startX - currentX);
   const selH = Math.abs(startY - currentY);
   
+  let sum = 0;
   const rows = grid.length;
   const cols = grid[0].length;
-  let selectedCells = [];
+  
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       let x = offsetX + c * cellSize;
       let y = offsetY + r * cellSize;
       const overlapArea = getRectOverlap(selX, selY, selW, selH, x, y, cellSize, cellSize);
-      const cellArea = cellSize * cellSize;
-      if (overlapArea >= cellArea / 2) {
-        selectedCells.push({ row: r, col: c });
+      if (overlapArea >= (cellSize * cellSize) / 2) {
+        sum += grid[r][c];
       }
     }
   }
-  socket.emit("selectApples", { cells: selectedCells });
+  
+  ctx.strokeStyle = sum === 10 ? "rgba(0,0,0,0.7)" : "blue";
+  ctx.lineWidth = sum === 10 ? 3 : 2;
+  ctx.strokeRect(selX, selY, selW, selH);
+  
+  if (sum === 10) {
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.fillRect(selX, selY, selW, selH);
+  }
 }
 
-// ----------------------------------------------------
-// Socket.IO events
-// ----------------------------------------------------
-socket.on("gameState", (data) => {
-  grid = data.grid;
-  players = data.players;
+function updatePlayerList(players) {
+  const list = document.getElementById("playerList");
+  list.innerHTML = players
+    .map(player => `<li>${player.nickname} ${player.id === socket.id ? '(you)' : ''}</li>`)
+    .join('');
+}
+
+function initializeGame(gameState) {
+  grid = gameState.grid;
+  players = gameState.players.reduce((acc, player) => {
+    acc[player.id] = player;
+    return acc;
+  }, {});
+  
+  // Set canvas size
+  canvas.width = 1200;
+  canvas.height = 1000;
+  
   autoScaleGrid();
   updateScoreboard();
-});
-
-socket.on("selectionSuccess", (data) => {
-    const { removed, playerId, newScore } = data;
-    players[playerId].score = newScore;
-    if (playerId === socket.id) {
-      myScore = newScore;
-      myScoreElem.textContent = myScore;
-    }
-    
-    removed.forEach(({ row, col }) => {
-      let oldValue = grid[row][col];
-      if (oldValue < 1) oldValue = 1;
-      let dir = Math.random() < 0.5 ? -1 : 1;
-      // Randomize arcPeak between, say, 100 and 200 pixels.
-      let randomArcPeak = 100 + Math.random() * 100;
-      // Optionally randomize arcSide as well (e.g., between 80 and 120 pixels)
-      let randomArcSide = 80 + Math.random() * 40;
-      
-      removingApples.push({
-        row,
-        col,
-        value: oldValue,
-        startTime: performance.now(),
-        duration: 600,    // duration in milliseconds
-        arcPeak: randomArcPeak,
-        arcSide: randomArcSide,
-        direction: dir
-      });
-      grid[row][col] = 0;
-    });
-    
-    updateScoreboard();
-  });
-
-socket.on("selectionFail", (data) => {
-  console.log("Selection failed:", data.reason);
-});
-
-socket.on("timerUpdate", (data) => {
-  timeLeftElem.textContent = data.timeLeft;
-});
-
-socket.on("gameOver", (data) => {
-  console.log("Game Over! Final Scores:", data.players);
-  
-  // Determine winner from players object
-  let winnerId = null;
-  for (let pid in data.players) {
-    if (!winnerId || data.players[pid].score > data.players[winnerId].score) {
-      winnerId = pid;
-    }
-  }
-  let winnerName = players[winnerId] && players[winnerId].nickname ? players[winnerId].nickname : (playerNames[winnerId] || "Unknown");
-  let winnerScore = data.players[winnerId].score;
-  
-  const modal = document.getElementById("gameOverModal");
-  const finalScoreElem = document.getElementById("finalScore");
-  finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${winnerName} (${winnerScore})`;
-  modal.style.display = "flex";
-  
-  updateScoreboard();
-});
-
-// --- Remote Cursor Handling ---
-socket.on("updateCursor", (data) => {
-  remoteCursors[data.playerId] = data;
-});
-socket.on("removeCursor", (data) => {
-  delete remoteCursors[data.playerId];
-});
-
-// Emit local cursor/selection info
-function emitCursor() {
-  socket.emit("playerCursor", {
-    x: currentX,
-    y: currentY,
-    isDragging: isDragging,
-    selection: { startX, startY, currentX, currentY }
-  });
 }
 
-// ----------------------------------------------------
-// Background Music and Sound Effects
-// ----------------------------------------------------
-const popSound = new Audio("pop.mp3");
-const bgmBoss = new Audio("boss.mp3");
-const bgmOIA = new Audio("oia.m4a");
-const bgmChill = new Audio("chill.m4a");
-const bgmAnime = new Audio("anime.m4a");
-
-const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
-bgmTracks.forEach(track => {
-  track.loop = true;
-  track.volume = parseFloat(document.getElementById("bgmVolume").value);
-});
-
-// Play pop sound on selection success and set its volume from popVolume slider
-socket.on("selectionSuccess", (data) => {
-  popSound.currentTime = 0;
-  popSound.volume = parseFloat(document.getElementById("popVolume").value);
-  popSound.play();
-});
-
-// BGM toggles
-document.getElementById("bgmToggleBoss").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    bgmBoss.play();
-  } else {
-    bgmBoss.pause();
-  }
-});
-document.getElementById("bgmToggleOIA").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    bgmOIA.play();
-  } else {
-    bgmOIA.pause();
-  }
-});
-document.getElementById("bgmToggleChill").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    bgmChill.play();
-  } else {
-    bgmChill.pause();
-  }
-});
-document.getElementById("bgmToggleAnime").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    bgmAnime.play();
-  } else {
-    bgmAnime.pause();
-  }
-});
-
-// BGM volume control
-document.getElementById("bgmVolume").addEventListener("input", (e) => {
-  const vol = parseFloat(e.target.value);
-  bgmTracks.forEach(track => track.volume = vol);
-});
-
-// Pop sound volume control
-document.getElementById("popVolume").addEventListener("input", (e) => {
-  const vol = parseFloat(e.target.value);
-  popSound.volume = vol;
-});
-
-// ----------------------------------------------------
-// Nickname Modal Handling
-// ----------------------------------------------------
-const nicknameModal = document.getElementById("nicknameModal");
-const nicknameInput = document.getElementById("nicknameInput");
-const nicknameSubmit = document.getElementById("nicknameSubmit");
-
-// When the nickname is submitted, send it to the server and hide the modal.
-nicknameSubmit.addEventListener("click", () => {
-  const nickname = nicknameInput.value.trim();
-  if (nickname === "") {
-    alert("Please enter a nickname.");
-    return;
-  }
-  myNickname = nickname;
-  // Emit setNickname event to server
-  socket.emit("setNickname", { nickname });
-  // Also store locally
-  playerNames[socket.id] = nickname;
-  // Hide the modal
-  nicknameModal.style.display = "none";
-});
-
-// Optionally, prevent closing the modal without entering a nickname
-window.addEventListener("load", () => {
-  nicknameModal.style.display = "flex";
-});
-
-// ----------------------------------------------------
-// Mouse & UI Setup
-// ----------------------------------------------------
+// Mouse event handlers
 canvas.addEventListener("mousedown", (e) => {
+  if (!gameActive) return;
   isDragging = true;
   const rect = canvas.getBoundingClientRect();
   startX = e.clientX - rect.left;
   startY = e.clientY - rect.top;
   currentX = startX;
   currentY = startY;
-  emitCursor();
+  
+  socket.emit("playerCursor", {
+    x: currentX,
+    y: currentY,
+    isDragging: true,
+    selection: { startX, startY, currentX, currentY }
+  });
 });
 
 canvas.addEventListener("mousemove", (e) => {
+  if (!gameActive) return;
   const rect = canvas.getBoundingClientRect();
   currentX = e.clientX - rect.left;
   currentY = e.clientY - rect.top;
+  
   if (isDragging) {
-    emitCursor();
+    socket.emit("playerCursor", {
+      x: currentX,
+      y: currentY,
+      isDragging: true,
+      selection: { startX, startY, currentX, currentY }
+    });
   }
 });
 
-// Global mouseup: if released outside the canvas, end drag.
-window.addEventListener("mouseup", (e) => {
-  if (isDragging) {
-    isDragging = false;
-    finalizeSelection();
-    emitCursor();
+window.addEventListener("mouseup", () => {
+  if (!gameActive || !isDragging) return;
+  isDragging = false;
+  
+  finalizeSelection();
+  socket.emit("playerCursor", {
+    x: currentX,
+    y: currentY,
+    isDragging: false,
+    selection: null
+  });
+});
+
+function finalizeSelection() {
+  const selX = Math.min(startX, currentX);
+  const selY = Math.min(startY, currentY);
+  const selW = Math.abs(startX - currentX);
+  const selH = Math.abs(startY - currentY);
+  
+  let selectedCells = [];
+  const rows = grid.length;
+  const cols = grid[0].length;
+  
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      let x = offsetX + c * cellSize;
+      let y = offsetY + r * cellSize;
+      const overlapArea = getRectOverlap(selX, selY, selW, selH, x, y, cellSize, cellSize);
+      if (overlapArea >= (cellSize * cellSize) / 2) {
+        selectedCells.push({ row: r, col: c });
+      }
+    }
   }
+  
+  socket.emit("selectApples", { cells: selectedCells });
+}
+
+function getRectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  const overlapX = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
+  const overlapY = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
+  return overlapX * overlapY;
+}
+
+// Initialize
+window.addEventListener("load", () => {
+  modals.initial.style.display = "flex";
+  canvas.width = 1200;
+  canvas.height = 1000;
+  requestAnimationFrame(drawGame);
 });
 
-// Reset button
-document.getElementById("resetButton").addEventListener("click", () => {
-  socket.emit("restartGame");
-});
-
-// Optional toggle for Light Colors
-document.getElementById("lightColors").addEventListener("change", (e) => {
-  console.log("Light Colors toggled:", e.target.checked);
-});
-
-// Close modal (for game over)
-document.getElementById("closeModal").addEventListener("click", () => {
-  document.getElementById("gameOverModal").style.display = "none";
-});
-
-// Start animation loop
-autoScaleGrid();
-requestAnimationFrame(drawGame);
 <!DOCTYPE html>
 <html>
 <head>
@@ -610,35 +618,56 @@ requestAnimationFrame(drawGame);
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Nickname Modal -->
-  <div id="nicknameModal" class="modal" style="display: flex;">
+  <!-- Initial Modal -->
+  <div id="initialModal" class="modal" style="display: flex;">
     <div class="modal-content">
-      <h2>Enter Your Nickname</h2>
-      <input type="text" id="nicknameInput" placeholder="Nickname" />
-      <button id="nicknameSubmit">Join Game</button>
+      <button id="createRoomBtn" class="modal-btn">Create Room</button>
+      <button id="joinExistingBtn" class="modal-btn">Join Room</button>
     </div>
   </div>
 
+  <!-- Create Room Modal -->
+  <div id="createRoomModal" class="modal">
+    <div class="modal-content">
+      <h2>Create Room</h2>
+      <input type="text" id="createNickname" placeholder="Nickname" required>
+      <input type="number" id="maxPlayers" min="1" max="5" value="2">
+      <button id="confirmCreateRoom" class="modal-btn">Create</button>
+    </div>
+  </div>
+
+  <!-- Join Room Modal -->
+  <div id="joinRoomModal" class="modal">
+    <div class="modal-content">
+      <h2>Join Room</h2>
+      <input type="text" id="joinNickname" placeholder="Nickname" required>
+      <input type="text" id="joinRoomCode" placeholder="Room Code" required>
+      <button id="confirmJoinRoom" class="modal-btn">Join</button>
+    </div>
+  </div>
+
+  <!-- Lobby Modal -->
+  <div id="lobbyModal" class="modal">
+    <div class="modal-content">
+      <h2>Room Code: <span id="roomCodeDisplay"></span></h2>
+      <h3>Players:</h3>
+      <ul id="playerList"></ul>
+      <button id="startGameBtn" class="modal-btn" disabled>Start Game</button>
+    </div>
+  </div>
+
+  <!-- Game Container -->
   <div id="frame">
     <div id="gameContainer">
-          
-      <!-- Larger canvas for extra space -->
-      <canvas id="gameCanvas" width="1200" height="1000"></canvas>
-      
-      <!-- Score display on top-right -->
-      <div id="scoreDisplay">
-        Score: <span id="yourScore">0</span>
+      <div id="waitOverlay">
+        <div class="wait-message">Waiting for next game...</div>
       </div>
-      
-      <!-- Timer on top-left -->
-      <div id="timerDisplay">
-        Time Left: <span id="timeLeft">0</span>
-      </div>
-      
-      <!-- Scoreboard on the right -->
+      <canvas id="gameCanvas"></canvas>
       <div id="scoreboard"></div>
-      
-      <!-- Bottom bar with Reset, toggles, etc. -->
+      <div id="gameInfo">
+        <div id="timer">Time Left: <span id="timeLeft">0</span>s</div>
+        <div id="score">Your Score: <span id="yourScore">0</span></div>
+      </div>
       <div id="bottomBar">
         <button id="resetButton">Reset</button>
         <div id="toggles">
@@ -653,11 +682,11 @@ requestAnimationFrame(drawGame);
       </div>
     </div>
     
-    <!-- Modal for game over -->
+    <!-- Game Over Modal -->
     <div id="gameOverModal" class="modal">
       <div class="modal-content">
         <h2>Game Over!</h2>
-        <p id="finalScore">Your Score: 0</p>
+        <p id="finalScore"></p>
         <button id="closeModal">Close</button>
       </div>
     </div>
@@ -667,92 +696,106 @@ requestAnimationFrame(drawGame);
   <script src="client.js"></script>
 </body>
 </html>
-/* Body background */
+
 body {
     margin: 0;
     padding: 0;
     font-family: Arial, sans-serif;
-    background:
-      linear-gradient(
-        rgba(0, 0, 0, 0.7), 
-        rgba(0, 0, 0, 0.7)
-      ),
-      url(bgimg.png);
+    background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url(bgimg.png);
     background-size: cover;
     background-position: center;
+    height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
   }
   
-  /* Outer green frame */
-  #frame {
-    background-color: #58b666;
+  .modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  
+  .modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 10px;
+    text-align: center;
+    min-width: 300px;
+  }
+  
+  .modal-btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    margin: 0.5rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  
+  .modal-btn:hover {
+    background: #2980b9;
+  }
+  
+  #gameContainer {
+    position: relative;
+    width: 1220px;
+    height: 1020px;
+    background: #c9f2d3;
     border: 6px solid #33a644;
     border-radius: 10px;
     padding: 10px;
+    display: none;
   }
   
-  /* Main container for the game */
-  #gameContainer {
-    position: relative;
-    background-color: #c9f2d3;
-    width: 1220px;  /* slightly bigger than the 1200x1000 canvas */
-    height: 1020px;
-    box-shadow: inset 0 0 0 2px #b2e6be;
-  }
-  
-  /* The grid canvas */
   #gameCanvas {
     position: absolute;
     left: 10px;
     top: 10px;
-    background-color: #daf7e2;
-    box-shadow: inset 0 0 0 1px #b2e6be;
+    background: #daf7e2;
+    border: 1px solid #b2e6be;
   }
   
-  /* Score display in top-right */
-  #scoreDisplay {
-    position: absolute;
-    top: 10px;
-    right: 20px;
-    font-size: 20px;
-    color: #fff;
-    background-color: #33a644;
-    padding: 5px 10px;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  }
-  
-  /* Timer in top-left */
-  #timerDisplay {
-    position: absolute;
-    top: 10px;
-    left: 20px;
-    font-size: 18px;
-    color: #fff;
-    background-color: #33a644;
-    padding: 5px 10px;
-    border-radius: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  }
-  
-  /* Scoreboard on the right */
   #scoreboard {
     position: absolute;
     top: 100px;
-    right: -240px;  /* outside the game container */
+    right: -240px;
     width: 180px;
-    background-color: rgba(187, 187, 187, 0.568);
+    background: rgba(187,187,187,0.57);
     padding: 10px;
     border-radius: 5px;
-    font-size: 16px;
-    color: #333;
     box-shadow: 0 2px 5px rgba(0,0,0,0.3);
   }
   
-  /* Bottom bar */
+  #waitOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-size: 24px;
+    z-index: 100;
+  }
+  
+  .spectator {
+    opacity: 0.5;
+    filter: grayscale(50%);
+  }
+  
   #bottomBar {
     position: absolute;
     bottom: 10px;
@@ -764,301 +807,341 @@ body {
     justify-content: space-between;
   }
   
-  /* Reset button */
-  #resetButton {
-    font-size: 16px;
+  #timer, #score {
+    position: absolute;
+    top: 10px;
+    background: rgba(255,255,255,0.9);
     padding: 5px 10px;
-    border: 2px solid #33a644;
-    background-color: #c9f2d3;
-    color: #33a644;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  #resetButton:hover {
-    background-color: #b2e6be;
-  }
-  
-  /* Toggles (Light Colors, BGM) */
-  #toggles {
-    font-size: 14px;
-    color: #33a644;
-  }
-  
-  /* Modal overlay */
-  .modal {
-    position: fixed;
-    z-index: 100;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-    display: none;
-    justify-content: center;
-    align-items: center;
-  }
-  
-  /* Modal content */
-  .modal-content {
-    background: #fff;
-    padding: 20px 30px;
     border-radius: 5px;
-    text-align: center;
-    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
   }
-/* Nickname Modal Overlay */
-#nicknameModal {
-    position: fixed;
-    z-index: 9999; /* Make sure it's above everything else */
+  
+  #timer { left: 20px; }
+  #score { right: 20px; }
+  
+  input[type="range"] {
+    vertical-align: middle;
+    margin: 0 10px;
+  }
+  /* Add these styles */
+#gameInfo {
+    position: absolute;
+    top: 10px;
     left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7); /* Dark overlay */
+    right: 0;
     display: flex;
-    justify-content: center;
-    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: rgba(255,255,255,0.9);
+    border-radius: 5px;
+    margin: 0 20px;
   }
   
-  /* The white modal box itself */
-  #nicknameModal .modal-content {
-    background: #fff;
-    padding: 30px 40px; /* More horizontal padding */
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  #gameInfo > div {
+    flex: 1;
     text-align: center;
-    max-width: 400px;
-    width: 90%;
-    box-sizing: border-box;
   }
   
-  
-  /* Title in the modal */
-  #nicknameModal .modal-content h2 {
-    margin-top: 0;
-    font-size: 24px;
-    color: #333;
+  #roomCodeDisplayInGame {
+    font-weight: bold;
+    color: #2980b9;
   }
   
-  /* Text input styling */
-  #nicknameModal input[type="text"] {
-    width: 100%;
-    padding: 10px;
-    margin: 20px 0;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 16px;
-    box-sizing: border-box;
+  #gameOverModal .modal-content {
+    min-width: 400px;
   }
   
-  #nicknameModal button {
-    width: 100%;
-    padding: 10px;
-    font-size: 16px;
-    background: #33a644;
-    border: none;
-    color: #fff;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.3s ease;
+  #gameOverModal .modal-btn {
+    margin: 10px;
   }
-  
-  #nicknameModal button:hover {
-    background: #2a8a3a;
-  }
+
   const express = require("express");
   const http = require("http");
   const socketIO = require("socket.io");
-  
   const app = express();
   const server = http.createServer(app);
   const io = socketIO(server);
   
-  app.use(express.static("public")); // Serve front-end files from /public
+  app.use(express.static("public"));
   
-  // Grid configuration
+  // Game configuration
   const GRID_ROWS = 15;
   const GRID_COLS = 20;
-  
-  // Global game state
-  let grid = [];
-  let players = {};
-  let gameDuration = 120; // seconds
-  let gameActive = false;
-  let timerInterval;
-  
-  // Global object to track players' cursors
-  let playerCursors = {};
+  const GAME_DURATION = 120; // 2 minutes
+  const rooms = new Map();
   
   /**
-   * Shuffle array (Fisher-Yates).
+   * Generate a random 6-character room code
    */
-  function shuffleArray(array) {
-      for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-      }
-      return array;
-    }
+  function generateRoomCode() {
+    return Math.random().toString(36).substr(2, 6).toUpperCase();
+  }
+  
+  /**
+   * Create a uniform board where each digit from 1 to 9 appears roughly equally
+   */
+  function createGrid() {
+    const totalCells = GRID_ROWS * GRID_COLS;
+    let numbers = [];
+    const baseCount = Math.floor(totalCells / 9);
     
-    /**
-     * Create a uniform board where each digit from 1 to 9 appears roughly equally.
-     * This ensures that complementary pairs (e.g., 1 & 9, 2 & 8, etc.) occur with similar frequency.
-     */
-    function createGrid(rows = GRID_ROWS, cols = GRID_COLS) {
-      const totalCells = rows * cols;
-      let numbers = [];
-      // Compute base count for each digit
-      let baseCount = Math.floor(totalCells / 9);
-      
-      // Add each number (1..9) exactly baseCount times
-      for (let n = 1; n <= 9; n++) {
-        for (let i = 0; i < baseCount; i++) {
-          numbers.push(n);
-        }
-      }
-      
-      // Fill any remaining cells (if totalCells is not divisible by 9) 
-      let remainder = totalCells - numbers.length;
-      let n = 1;
-      while (remainder > 0) {
+    // Add each number (1..9) exactly baseCount times
+    for (let n = 1; n <= 9; n++) {
+      for (let i = 0; i < baseCount; i++) {
         numbers.push(n);
-        n = (n % 9) + 1;
-        remainder--;
       }
-      
-      // Shuffle the numbers array to randomize placement
-      shuffleArray(numbers);
-      
-      // Build the board (2D array)
-      let board = [];
-      let idx = 0;
-      for (let r = 0; r < rows; r++) {
-        let row = [];
-        for (let c = 0; c < cols; c++) {
-          row.push(numbers[idx++]);
-        }
-        board.push(row);
-      }
-      return board;
-    }
-  /** Start a new game: create grid, reset scores, broadcast state, start timer. */
-  function startGame() {
-    grid = createGrid();
-    gameActive = true;
-    Object.values(players).forEach((p) => (p.score = 0));
-    io.emit("gameState", {
-      grid,
-      players,
-      timeLeft: gameDuration,
-    });
-    let timeLeft = gameDuration;
-    timerInterval = setInterval(() => {
-      timeLeft--;
-      if (timeLeft <= 0) {
-        gameOver();
-      } else {
-        io.emit("timerUpdate", { timeLeft });
-      }
-    }, 1000);
-  }
-  
-  /** End the current game session. */
-  function gameOver() {
-    clearInterval(timerInterval);
-    gameActive = false;
-    io.emit("gameOver", { players });
-  }
-  function endGame() {
-      clearInterval(timerInterval);
-      gameActive = false;
-      io.emit("endGame", { players });
     }
     
-  // Socket.IO events
+    // Fill any remaining cells
+    let remainder = totalCells - numbers.length;
+    let n = 1;
+    while (remainder > 0) {
+      numbers.push(n);
+      n = (n % 9) + 1;
+      remainder--;
+    }
+    
+    // Shuffle the numbers
+    numbers = numbers.sort(() => Math.random() - 0.5);
+    
+    // Build the 2D array
+    let board = [];
+    let idx = 0;
+    for (let r = 0; r < GRID_ROWS; r++) {
+      let row = [];
+      for (let c = 0; c < GRID_COLS; c++) {
+        row.push(numbers[idx++]);
+      }
+      board.push(row);
+    }
+    return board;
+  }
+  
+  /**
+   * Calculate score based on combo length (triangular number)
+   */
+  function calculateScore(length) {
+    return Math.floor((length * (length + 1)) / 2);
+  }
+  
   io.on("connection", (socket) => {
-    console.log(`New client connected: ${socket.id}`);
-    players[socket.id] = { playerId: socket.id, score: 0 };
+    let currentRoom = null;
   
-    if (gameActive) {
-      socket.emit("gameState", { grid, players });
-    }
-  
-    // Listen for player's cursor updates
-    socket.on("playerCursor", (data) => {
-      // data: { x, y, isDragging, selection: { startX, startY, currentX, currentY } }
-      playerCursors[socket.id] = data;
-      // Broadcast to everyone except sender
-      socket.broadcast.emit("updateCursor", { playerId: socket.id, ...data });
+    // Create a new game room
+    socket.on("createRoom", ({ maxPlayers, nickname }) => {
+      const roomCode = generateRoomCode();
+      const room = {
+        code: roomCode,
+        host: socket.id,
+        maxPlayers: Math.min(5, Math.max(1, maxPlayers)),
+        players: new Map(),
+        spectators: new Set(),
+        gameActive: false,
+        grid: null,
+        timer: null,
+        timeLeft: GAME_DURATION
+      };
+      
+      room.players.set(socket.id, {
+        id: socket.id,
+        nickname,
+        score: 0,
+        isActive: true
+      });
+      
+      rooms.set(roomCode, room);
+      currentRoom = roomCode;
+      socket.join(roomCode);
+      
+      socket.emit("roomCreated", {
+        roomCode,
+        players: Array.from(room.players.values())
+      });
     });
-    socket.on("setNickname", (data) => {
-      if (players[socket.id]) {
-        players[socket.id].nickname = data.nickname;
+  
+    // Join an existing room
+    socket.on("joinRoom", ({ roomCode, nickname }) => {
+      const room = rooms.get(roomCode.toUpperCase());
+      if (!room) return socket.emit("roomError", "Room not found");
+      
+      if (room.gameActive) {
+        // Join as spectator if game is already active
+        room.spectators.add(socket.id);
+        socket.join(roomCode);
+        socket.emit("spectatorJoined", { 
+          grid: room.grid,
+          players: Array.from(room.players.values()),
+          timeLeft: room.timeLeft 
+        });
+        return;
+      }
+      
+      if (room.players.size >= room.maxPlayers) {
+        return socket.emit("roomError", "Room is full");
+      }
+      
+      room.players.set(socket.id, { 
+        id: socket.id, 
+        nickname,
+        score: 0,
+        isActive: true 
+      });
+      currentRoom = roomCode;
+      socket.join(roomCode);
+      
+      // Notify the joining player
+      socket.emit("roomJoined", {
+        roomCode,
+        players: Array.from(room.players.values())
+      });
+      
+      // Notify all players in the room
+      io.to(roomCode).emit("playerJoined", Array.from(room.players.values()));
+    });
+    socket.on("quitRoom", () => {
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+      
+      if (room.players.has(socket.id)) {
+        room.players.delete(socket.id);
+        io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
+        
+        if (room.players.size === 0) {
+          clearInterval(room.timer);
+          rooms.delete(currentRoom);
+        }
       }
     });
-    
-    // Handle apple selection
+    // Start the game (host only)
+    socket.on("startGame", () => {
+      const room = rooms.get(currentRoom);
+      if (!room || room.host !== socket.id) return;
+      
+      room.gameActive = true;
+      room.grid = createGrid();
+      room.timeLeft = GAME_DURATION;
+      
+      // Start game timer
+      room.timer = setInterval(() => {
+        room.timeLeft--;
+        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
+        
+        if (room.timeLeft <= 0) {
+          clearInterval(room.timer);
+          endGame(room);
+        }
+      }, 1000);
+      
+      // Notify all players that game has started
+      io.to(room.code).emit("gameStarted", {
+        grid: room.grid,
+        players: Array.from(room.players.values())
+      });
+    });
+  
+    // Handle apple selection attempts
     socket.on("selectApples", (data) => {
-      if (!gameActive || !data.cells) return;
-    
+      const room = rooms.get(currentRoom);
+      if (!room || !room.gameActive || !room.players.get(socket.id)?.isActive) return;
+      
       let sum = 0;
       let validCells = [];
-    
+      
+      // Validate selected cells
       for (let cell of data.cells) {
         const { row, col } = cell;
-        if (grid[row] && grid[row][col] && grid[row][col] > 0) {
-          sum += grid[row][col];
+        if (room.grid[row] && room.grid[row][col] && room.grid[row][col] > 0) {
+          sum += room.grid[row][col];
           validCells.push({ row, col });
         }
       }
-    
+      
+      // If selection sums to 10 and has at least one cell
       if (sum === 10 && validCells.length > 0) {
-        // ✅ NEW SCORING LOGIC BASED ON LENGTH
-        const comboLength = validCells.length;
-        const scoreGained = calculateScore(comboLength);
-    
+        // Clear the selected cells
         validCells.forEach(({ row, col }) => {
-          grid[row][col] = 0;
+          room.grid[row][col] = 0;
         });
-    
-        players[socket.id].score += scoreGained;
-    
-        io.emit("selectionSuccess", {
+        
+        // Update player score
+        const player = room.players.get(socket.id);
+        player.score += calculateScore(validCells.length);
+        
+        // Notify all players of successful selection
+        io.to(room.code).emit("selectionSuccess", {
           removed: validCells,
           playerId: socket.id,
-          newScore: players[socket.id].score,
-        });
+          newScore: player.score
+        });      
       } else {
-        socket.emit("selectionFail", {
-          reason: "Sum not 10 or cells invalid.",
-        });
+        // Notify player of failed selection
+        socket.emit("selectionFail", { reason: "Invalid selection" });
       }
     });
-    
-    // Scoring helper (feel free to tweak)
-    function calculateScore(length) {
-      return Math.floor((length * (length + 1)) / 2); // Triangular number logic
-    }
   
-    // Restart game
-    socket.on("restartGame", () => {
-      console.log("Restarting game at the request of:", socket.id);
-      endGame();
-      startGame();
+    // Broadcast cursor position to other players
+    socket.on("playerCursor", (data) => {
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+      
+      socket.to(room.code).emit("updateCursor", {
+        playerId: socket.id,
+        ...data
+      });
     });
   
+    // Handle disconnections
     socket.on("disconnect", () => {
-      console.log(`Client disconnected: ${socket.id}`);
-      delete players[socket.id];
-      delete playerCursors[socket.id];
-      socket.broadcast.emit("removeCursor", { playerId: socket.id });
+      const room = rooms.get(currentRoom);
+      if (!room) return;
+      
+      if (room.players.has(socket.id)) {
+        // Remove player and notify others
+        room.players.delete(socket.id);
+        io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
+        
+        // If host left, assign new host
+        if (room.host === socket.id && room.players.size > 0) {
+          room.host = room.players.keys().next().value;
+        }
+        
+        // End game if no players left
+        if (room.players.size === 0) {
+          clearInterval(room.timer);
+          rooms.delete(currentRoom);
+        }
+      } 
+      else if (room.spectators.has(socket.id)) {
+        room.spectators.delete(socket.id);
+      }
     });
+  
+    /**
+     * End the game and declare winner
+     */
+    function endGame(room) {
+      room.gameActive = false;
+      clearInterval(room.timer);
+      
+      const players = Array.from(room.players.values());
+      let winner = players[0];
+      
+      // Find player with highest score
+      for (let i = 1; i < players.length; i++) {
+        if (players[i].score > winner.score) {
+          winner = players[i];
+        }
+      }
+      
+      io.to(room.code).emit("gameOver", {
+        players,
+        winner: winner.nickname,
+        score: winner.score
+      });
+    }
   });
   
   // Start the server
   const PORT = process.env.PORT || 3000;
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    startGame();
   });
-  

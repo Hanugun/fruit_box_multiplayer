@@ -6,35 +6,56 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Nickname Modal -->
-  <div id="nicknameModal" class="modal" style="display: flex;">
+  <!-- Initial Modal -->
+  <div id="initialModal" class="modal" style="display: flex;">
     <div class="modal-content">
-      <h2>Enter Your Nickname</h2>
-      <input type="text" id="nicknameInput" placeholder="Nickname" />
-      <button id="nicknameSubmit">Join Game</button>
+      <button id="createRoomBtn" class="modal-btn">Create Room</button>
+      <button id="joinExistingBtn" class="modal-btn">Join Room</button>
     </div>
   </div>
 
+  <!-- Create Room Modal -->
+  <div id="createRoomModal" class="modal">
+    <div class="modal-content">
+      <h2>Create Room</h2>
+      <input type="text" id="createNickname" placeholder="Nickname" required>
+      <input type="number" id="maxPlayers" min="1" max="5" value="2">
+      <button id="confirmCreateRoom" class="modal-btn">Create</button>
+    </div>
+  </div>
+
+  <!-- Join Room Modal -->
+  <div id="joinRoomModal" class="modal">
+    <div class="modal-content">
+      <h2>Join Room</h2>
+      <input type="text" id="joinNickname" placeholder="Nickname" required>
+      <input type="text" id="joinRoomCode" placeholder="Room Code" required>
+      <button id="confirmJoinRoom" class="modal-btn">Join</button>
+    </div>
+  </div>
+
+  <!-- Lobby Modal -->
+  <div id="lobbyModal" class="modal">
+    <div class="modal-content">
+      <h2>Room Code: <span id="roomCodeDisplay"></span></h2>
+      <h3>Players:</h3>
+      <ul id="playerList"></ul>
+      <button id="startGameBtn" class="modal-btn" disabled>Start Game</button>
+    </div>
+  </div>
+
+  <!-- Game Container -->
   <div id="frame">
     <div id="gameContainer">
-          
-      <!-- Larger canvas for extra space -->
-      <canvas id="gameCanvas" width="1200" height="1000"></canvas>
-      
-      <!-- Score display on top-right -->
-      <div id="scoreDisplay">
-        Score: <span id="yourScore">0</span>
+      <div id="waitOverlay">
+        <div class="wait-message">Waiting for next game...</div>
       </div>
-      
-      <!-- Timer on top-left -->
-      <div id="timerDisplay">
-        Time Left: <span id="timeLeft">0</span>
-      </div>
-      
-      <!-- Scoreboard on the right -->
+      <canvas id="gameCanvas"></canvas>
       <div id="scoreboard"></div>
-      
-      <!-- Bottom bar with Reset, toggles, etc. -->
+      <div id="gameInfo">
+        <div id="timer">Time Left: <span id="timeLeft">0</span>s</div>
+        <div id="score">Your Score: <span id="yourScore">0</span></div>
+      </div>
       <div id="bottomBar">
         <button id="resetButton">Reset</button>
         <div id="toggles">
@@ -49,14 +70,14 @@
       </div>
     </div>
     
-    <!-- Modal for game over -->
+    <!-- Game Over Modal -->
     <div id="gameOverModal" class="modal">
-      <div class="modal-content">
-        <h2>Game Over!</h2>
-        <p id="finalScore">Your Score: 0</p>
-        <button id="closeModal">Close</button>
+        <div class="modal-content">
+          <h2>Game Over!</h2>
+          <p id="finalScore"></p>
+          <!-- Buttons will be added dynamically -->
+        </div>
       </div>
-    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
