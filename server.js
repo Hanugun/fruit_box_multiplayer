@@ -9,8 +9,8 @@ const io = socketIO(server);
 app.use(express.static("public")); // Serve front-end files from /public
 
 // Grid configuration
-const GRID_ROWS = 10;
-const GRID_COLS = 17;
+const GRID_ROWS = 15;
+const GRID_COLS = 20;
 
 // Global game state
 let grid = [];
@@ -22,81 +22,58 @@ let timerInterval;
 // Global object to track players' cursors
 let playerCursors = {};
 
-/** Shuffle array (Fisher-Yates). */
 /**
  * Shuffle array (Fisher-Yates).
  */
 function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-/**
- * Create a grid with an even distribution of numbers 1..9,
- * then place them row by row, swapping out duplicates
- * when we detect adjacency with left or above cells.
- */
-function createGrid(rows = GRID_ROWS, cols = GRID_COLS) {
-  const totalCells = rows * cols;
-  let numbers = [];
-
-  // Evenly distribute 1..9
-  const countEach = Math.floor(totalCells / 9);
-  for (let n = 1; n <= 9; n++) {
-    for (let i = 0; i < countEach; i++) {
-      numbers.push(n);
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
     }
+    return array;
   }
-  // Fill leftover
-  while (numbers.length < totalCells) {
-    numbers.push(Math.floor(Math.random() * 9) + 1);
-  }
-
-  // Shuffle once
-  shuffleArray(numbers);
-
-  // Prepare empty grid
-  let newGrid = Array.from({ length: rows }, () => Array(cols).fill(0));
-
-  // We'll place numbers in row-major order,
-  // but if we detect adjacency duplicates, try a quick swap.
-  let index = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      let chosen = numbers[index];
-
-      let left = c > 0 ? newGrid[r][c - 1] : null;
-      let up   = r > 0 ? newGrid[r - 1][c] : null;
-
-      // If chosen is the same as left or up, try to swap it
-      if ((chosen === left) || (chosen === up)) {
-        let swapIndex = -1;
-
-        // Look ahead in the array for a different digit
-        for (let j = index + 1; j < numbers.length; j++) {
-          let temp = numbers[j];
-          if (temp !== left && temp !== up) {
-            swapIndex = j;
-            break;
-          }
-        }
-        // If found a suitable candidate, swap
-        if (swapIndex !== -1) {
-          [numbers[index], numbers[swapIndex]] = [numbers[swapIndex], numbers[index]];
-          chosen = numbers[index];
-        }
+  
+  /**
+   * Create a uniform board where each digit from 1 to 9 appears roughly equally.
+   * This ensures that complementary pairs (e.g., 1 & 9, 2 & 8, etc.) occur with similar frequency.
+   */
+  function createGrid(rows = GRID_ROWS, cols = GRID_COLS) {
+    const totalCells = rows * cols;
+    let numbers = [];
+    // Compute base count for each digit
+    let baseCount = Math.floor(totalCells / 9);
+    
+    // Add each number (1..9) exactly baseCount times
+    for (let n = 1; n <= 9; n++) {
+      for (let i = 0; i < baseCount; i++) {
+        numbers.push(n);
       }
-
-      newGrid[r][c] = chosen;
-      index++;
     }
+    
+    // Fill any remaining cells (if totalCells is not divisible by 9) 
+    let remainder = totalCells - numbers.length;
+    let n = 1;
+    while (remainder > 0) {
+      numbers.push(n);
+      n = (n % 9) + 1;
+      remainder--;
+    }
+    
+    // Shuffle the numbers array to randomize placement
+    shuffleArray(numbers);
+    
+    // Build the board (2D array)
+    let board = [];
+    let idx = 0;
+    for (let r = 0; r < rows; r++) {
+      let row = [];
+      for (let c = 0; c < cols; c++) {
+        row.push(numbers[idx++]);
+      }
+      board.push(row);
+    }
+    return board;
   }
-
-  return newGrid;
-}
 /** Start a new game: create grid, reset scores, broadcast state, start timer. */
 function startGame() {
   grid = createGrid();

@@ -366,16 +366,28 @@ socket.on("timerUpdate", (data) => {
 });
 
 socket.on("gameOver", (data) => {
-  console.log("Game Over! Final Scores:", data.players);
-  const modal = document.getElementById("gameOverModal");
-  const finalScoreElem = document.getElementById("finalScore");
-  finalScoreElem.innerText = `Your Score: ${myScore}`;
-  modal.style.display = "flex";
-  updateScoreboard();
+    console.log("Game Over! Final Scores:", data.players);
+    
+    // Determine the winner
+    let winnerId = null;
+    for (let pid in data.players) {
+      if (!winnerId || data.players[pid].score > data.players[winnerId].score) {
+        winnerId = pid;
+      }
+    }
+    let winnerName = playerNames[winnerId] || "Unknown";
+    let winnerScore = data.players[winnerId].score;
+    
+    const modal = document.getElementById("gameOverModal");
+    const finalScoreElem = document.getElementById("finalScore");
+    finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${winnerName} (${winnerScore})`;
+    modal.style.display = "flex";
+    
+    updateScoreboard();
 });
 socket.on("endGame", (data) => {
     updateScoreboard();
-  });
+});
 // --- Remote Cursor Handling ---
 socket.on("updateCursor", (data) => {
   // Data: { playerId, x, y, isDragging, selection }
