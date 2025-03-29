@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Fruit Box Multiplayer</title>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="frame">
+    <div id="gameContainer">
+      <!-- Larger canvas for extra space -->
+      <canvas id="gameCanvas" width="1200" height="1000"></canvas>
+      
+      <!-- Score display on top-right -->
+      <div id="scoreDisplay">
+        Score: <span id="yourScore">0</span>
+      </div>
+      
+      <!-- Timer on top-left -->
+      <div id="timerDisplay">
+        Time Left: <span id="timeLeft">0</span>
+      </div>
+      
+      <!-- Scoreboard on the right -->
+      <div id="scoreboard"></div>
+      
+      <!-- Bottom bar with Reset, toggles, etc. -->
+      <div id="bottomBar">
+        <button id="resetButton">Reset</button>
+        <div id="toggles">
+          <label><input type="checkbox" id="lightColors"> Light Colors</label>
+          <label><input type="checkbox" id="bgmToggleBoss"> Boss</label>
+          <label><input type="checkbox" id="bgmToggleOIA"> OIA</label>
+          <label><input type="checkbox" id="bgmToggleChill"> Chill</label>
+          <label><input type="checkbox" id="bgmToggleAnime"> Anime</label>
+          <label>BGM Volume: <input type="range" id="bgmVolume" min="0" max="1" step="0.01" value="0.5"></label>
+          <label>Pop Volume: <input type="range" id="popVolume" min="0" max="1" step="0.01" value="0.5"></label>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Modal for game over -->
+    <div id="gameOverModal" class="modal">
+      <div class="modal-content">
+        <h2>Game Over!</h2>
+        <p id="finalScore">Your Score: 0</p>
+        <button id="closeModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
