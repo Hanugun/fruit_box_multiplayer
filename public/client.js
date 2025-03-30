@@ -465,7 +465,7 @@ function updateScoreboard() {
   const sortedPlayers = Object.values(players).sort((a, b) => b.score - a.score);
   let html = `<div class="scoreboard-grid">`;
 
-  sortedPlayers.slice(0, 3).forEach((player, index) => {
+  sortedPlayers.slice(0, 5).forEach((player, index) => {
     const color = getPlayerColor(player.id);
     html += `
             <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
@@ -477,8 +477,8 @@ function updateScoreboard() {
         `;
   });
 
-  if (sortedPlayers.length > 3) {
-    html += `<div class="more-players">+${sortedPlayers.length - 3}</div>`;
+  if (sortedPlayers.length > 5) {
+    html += `<div class="more-players">+${sortedPlayers.length - 5}</div>`;
   }
 
   html += `</div>`;
