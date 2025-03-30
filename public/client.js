@@ -213,6 +213,7 @@ document.getElementById("confirmJoinRoom").addEventListener("click", () => {
 socket.on("roomJoined", ({ roomCode, players }) => {
   currentRoom = roomCode;
   isHost = false;
+  roomCodeDisplayElem.textContent = roomCode;
   updateRoomCodeDisplay();
   modals.lobby.style.display = "flex";
   updatePlayerList(players);
@@ -259,6 +260,7 @@ document.getElementById("popVolume").addEventListener("input", (e) => {
 socket.on("roomCreated", ({ roomCode, players }) => {
   currentRoom = roomCode;
   isHost = true;
+  roomCodeDisplayElem.textContent = roomCode;
   updateRoomCodeDisplay();
   modals.create.style.display = "none";
   modals.lobby.style.display = "flex";
@@ -415,7 +417,18 @@ socket.on("gameReset", () => {
     socket.emit("requestRejoin");
   }
 });
+function updateRoomCodeDisplay() {
+  const gameInfo = document.getElementById("gameInfo");
+  const roomCodeSpan = document.createElement("span");
+  roomCodeSpan.id = "roomCodeDisplayInGame";
+  roomCodeSpan.textContent = currentRoom;
+  roomCodeSpan.style.margin = "0 auto";
 
+  const existing = document.getElementById("roomCodeDisplayInGame");
+  if (existing) existing.remove();
+
+  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
+}
 socket.on("updateCursor", (data) => {
   remoteCursors[data.playerId] = data;
 });
@@ -833,18 +846,7 @@ function sendCursorUpdate() {
   });
 }
 
-function updateRoomCodeDisplay() {
-  const gameInfo = document.getElementById("gameInfo");
-  const roomCodeSpan = document.createElement("span");
-  roomCodeSpan.id = "roomCodeDisplayInGame";
-  roomCodeSpan.textContent = currentRoom;
-  roomCodeSpan.style.margin = "0 auto";
 
-  const existing = document.getElementById("roomCodeDisplayInGame");
-  if (existing) existing.remove();
-
-  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
-}
 
 // Copy room code functionality
 document.getElementById('copyIcon').addEventListener('click', function() {
