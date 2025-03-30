@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Chewy&family=Fredoka+One&family=Luckiest+Guy&family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2377776881137719"
@@ -31,13 +32,20 @@
   </div>
   <div id="createRoomModal" class="modal">
     <div class="modal-content">
+      <button class="back-button" id="backFromCreate">
+        <span class="material-icons">arrow_back</span>
+      </button>
       <h2>Create Room</h2>
       <input type="text" id="createNickname" placeholder="Nickname" required>
       <button id="confirmCreateRoom" class="modal-btn">Create</button>
     </div>
   </div>
+  
   <div id="joinRoomModal" class="modal">
     <div class="modal-content">
+      <button class="back-button" id="backFromJoin">
+        <span class="material-icons">arrow_back</span>
+      </button>
       <h2>Join Room</h2>
       <input type="text" id="joinNickname" placeholder="Nickname" required>
       <input type="text" id="joinRoomCode" placeholder="Room Code" required>
@@ -46,6 +54,9 @@
   </div>
   <div id="lobbyModal" class="modal">
     <div class="modal-content">
+      <button class="back-button" id="backFromLobby">
+        <span class="material-icons">arrow_back</span>
+      </button>
       <h2 class="room-code-label">
         Room Code:
         <span id="roomCodeDisplayWrapper">
@@ -56,7 +67,7 @@
       <h3>Players:</h3>
       <ul id="playerList" class="player-list"></ul>      
       <button id="startGameBtn" class="modal-btn" disabled>Start Game</button>
-
+  
       <!-- Ad in lobby modal -->
       <div class="adsense-box" style="margin-top: 1.5rem;">
         <p>[Ad Placeholder — Lobby]</p>
@@ -66,7 +77,12 @@
   <div id="frame">
     <div id="gameContainer">
       <div id="waitOverlay">
-        <div class="wait-message">Waiting for next game...</div>
+        <button id="waitOverlayBackBtn" class="back-button">
+          <span class="material-icons">arrow_back</span>
+        </button>
+        <div class="wait-overlay-content">
+          <div class="wait-message">Waiting for next game...</div>
+        </div>
       </div>
       <div id="gameHeader">
         <div id="scoreboard"></div>
@@ -83,11 +99,9 @@
       <div id="bottomBar">
         <button id="resetButton" class="modal-btn">Reset</button>
         <div id="toggles">
-          <label><input type="checkbox" id="lightColors"> Light Colors</label>
           <label><input type="checkbox" id="bgmToggleBoss"> Boss</label>
           <label><input type="checkbox" id="bgmToggleOIA"> OIA</label>
           <label><input type="checkbox" id="bgmToggleChill"> Chill</label>
-          <label><input type="checkbox" id="bgmToggleAnime"> Anime</label>
           <label>BGM Volume: <input type="range" id="bgmVolume" min="0" max="1" step="0.01" value="0.5"></label>
           <label>Pop Volume: <input type="range" id="popVolume" min="0" max="1" step="0.01" value="0.5"></label>
         </div>

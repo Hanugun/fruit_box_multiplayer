@@ -85,6 +85,7 @@ io.on("connection", (socket) => {
       grid: null,
       timer: null,
       timeLeft: GAME_DURATION,
+      pokeCombos: new Map(),
     };
 
     room.players.set(socket.id, {
@@ -194,20 +195,28 @@ socket.on("requestRejoin", () => {
     socket.emit("roomError", "Not previously in this room");
   }
 });
-  socket.on("quitRoom", () => {
-    const room = rooms.get(currentRoom);
-    if (!room) return;
+socket.on("quitRoom", () => {
+  const room = rooms.get(currentRoom);
+  if (!room) return;
 
-    if (room.players.has(socket.id)) {
-      room.players.delete(socket.id);
-      io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
-
-      if (room.players.size === 0) {
-        clearInterval(room.timer);
-        rooms.delete(currentRoom);
-      }
+  // Remove from players if present
+  if (room.players.has(socket.id)) {
+    room.players.delete(socket.id);
+    io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
+    if (room.players.size === 0) {
+      clearInterval(room.timer);
+      rooms.delete(currentRoom);
     }
-  });
+  }
+  // Also remove from spectators if present
+  if (room.spectators.has(socket.id)) {
+    room.spectators.delete(socket.id);
+  }
+  // Remove the socket from the room completely
+  socket.leave(room.code);
+});
+
+
   // Start the game (host only)
   socket.on("startGame", () => {
     const room = rooms.get(currentRoom);
@@ -319,8 +328,39 @@ socket.on("requestRejoin", () => {
       socket.emit("selectionFail", { reason: "Invalid selection" });
     }
   });
-
-  // Broadcast cursor position to other players
+  socket.on("resetGame", () => {
+    const room = rooms.get(currentRoom);
+    if (!room || room.host !== socket.id) return;
+  
+    // Reset all player scores
+    room.players.forEach(player => {
+      player.score = 0;
+    });
+  
+    // Reset the grid if game is active
+    if (room.gameActive) {
+      room.grid = createGrid();
+      room.timeLeft = GAME_DURATION;
+      
+      // Reset and restart timer
+      if (room.timer) clearInterval(room.timer);
+      room.timer = setInterval(() => {
+        room.timeLeft--;
+        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
+        if (room.timeLeft <= 0) {
+          clearInterval(room.timer);
+          endGame(room);
+        }
+      }, 1000);
+    }
+  
+    // Broadcast the full reset state to all clients
+    io.to(room.code).emit("gameReset", {
+      players: Array.from(room.players.values()),
+      grid: room.grid,
+      timeLeft: room.timeLeft
+    });
+  });
   socket.on("playerCursor", (data) => {
     const room = rooms.get(currentRoom);
     if (!room) return;
@@ -330,7 +370,32 @@ socket.on("requestRejoin", () => {
       ...data,
     });
   });
-
+  socket.on("pokeHost", () => {
+    const room = rooms.get(currentRoom);
+    if (!room) return;
+    const TIMEOUT = 2000; // milliseconds for combo threshold
+    const now = Date.now();
+  
+    // Retrieve or initialize combo data for this sender
+    let comboData = room.pokeCombos.get(socket.id) || { count: 0, lastTime: 0 };
+  
+    // If the last poke was within the threshold, increment; otherwise, reset
+    if (now - comboData.lastTime < TIMEOUT) {
+      comboData.count++;
+    } else {
+      comboData.count = 1;
+    }
+    comboData.lastTime = now;
+    room.pokeCombos.set(socket.id, comboData);
+  
+    // Forward the poke to the host with the combo count
+    if (room.host) {
+      io.to(room.host).emit("pokeReceived", { from: socket.id, combo: comboData.count });
+    }
+  
+    // Also send the combo count back to the poking (non-host) player
+    socket.emit("pokeCombo", { combo: comboData.count });
+  });
   // Handle disconnections
   socket.on("disconnect", () => {
     const room = rooms.get(currentRoom);

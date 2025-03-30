@@ -25,6 +25,7 @@ body.valorant-theme {
 }
 
 .modal-content {
+  display: grid;
   background: #1A1E24;
   padding: 2rem;
   border-radius: 12px;
@@ -35,7 +36,141 @@ body.valorant-theme {
   border: 2px solid #FF4655;
   color: #ECE8E1;
 }
+.modal-content input[type="text"] {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  margin: 0.8rem 0;
+  border: 2px solid #3F444C;
+  background: #2A2E35;
+  color: #ECE8E1;
+  border-radius: 6px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+}
 
+.modal-content input[type="text"]:focus {
+  outline: none;
+  border-color: #FF4655;
+  box-shadow: 0 0 0 2px rgba(255, 70, 85, 0.3);
+}
+
+.modal-content input[type="text"]::placeholder {
+  color: #5A5E66;
+}
+.modal-header {
+  position: relative;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+.back-button {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: none;
+  border: none;
+  color: #FF4655;
+  cursor: pointer;
+  font-size: 1.5rem;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s ease;
+  border-radius: 50%;
+  width: 2.5rem;
+  height: 2.5rem;
+  justify-content: center;
+}
+
+.back-button:hover {
+  background: rgba(255, 70, 85, 0.2);
+  transform: translateX(-3px);
+}
+
+.back-button:active {
+  transform: translateX(-3px) scale(0.95);
+}
+
+.back-button .material-icons {
+  font-size: 1.8rem;
+}
+
+/* Add back button to wait overlay */
+#waitOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  font-size: 1.4rem;
+  z-index: 100;
+  color: #FF4655;
+  text-align: center;
+  flex-direction: column;
+}
+
+.wait-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+}
+
+#waitOverlayBackBtn {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 1rem;
+  align-self: flex-start;
+}
+
+.modal-content h2 {
+  margin: 0.5rem 0 1.5rem 0;
+  position: relative;
+  text-align: center;
+  padding: 0 2rem; /* Add padding for back button */
+}
+/* Adjust create/join modals for the back button */
+#createRoomModal .modal-content,
+#joinRoomModal .modal-content {
+  position: relative;
+}
+
+#createRoomModal h2,
+#joinRoomModal h2 {
+  padding-left: 1.5rem; /* Make space for back button */
+}
+#createRoomModal .modal-content,
+#joinRoomModal .modal-content,
+#lobbyModal .modal-content {
+  position: relative;
+  padding-top: 3rem; /* Make space for back button */
+}
+/* Position lobby back button */
+#backFromLobby {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+}
+
+/* Adjust room code display to account for back button */
+.room-code-label {
+  margin-top: 0.5rem;
+}
+/* Position back buttons in modals */
+#backFromCreate,
+#backFromJoin {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+}
 .modal-btn {
   background: #FF4655;
   color: #ffffff;
@@ -52,7 +187,11 @@ body.valorant-theme {
   min-width: 200px;
   margin: 0.5rem 0;
 }
-
+.modal-btn.small-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  margin: 0 auto;
+}
 .modal-btn:hover {
   background: #D63245;
   transform: scale(1.05);
@@ -363,9 +502,6 @@ input[type="range"] {
   .modal-content {
     width: 95%;
   }
-  .modal-btn {
-    width: 90%;
-  }
 }
 
 @media (max-width: 480px) {
@@ -450,4 +586,95 @@ input[type="range"] {
   .adsense-side {
     display: none;
   }
+}
+
+
+.sticker {
+  transition: opacity 1s;
+  /* Additional styling if needed */
+}
+
+/* Fade out effect */
+.fade-out {
+  opacity: 0;
+}
+
+/* Combo count overlay (if used) */
+.combo-count {
+  margin-left: 0.5rem;
+  font-size: 0.6em;  /* Relative to parent */
+  color: #FFD700;
+}
+
+/* Optionally, add a pulse animation if desired */
+@keyframes pokePulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.sticker {
+  animation: pokePulse 0.3s ease-out;
+}
+/* .poke-combo {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255,70,85,0.9);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 1rem;
+  z-index: 1000;
+  transition: opacity 1s ease;
+}
+
+.poke-combo.fade-out {
+  opacity: 0;
+} */
+/* The main combo element */
+.poke-combo-indicator {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 3rem;
+  color: #FF4655;
+  font-weight: bold;
+  z-index: 9999;
+  pointer-events: none;     /* So it doesn't block clicks */
+  animation: pokePulse 0.3s ease-out;
+  /* We'll set transform in JS to adjust scale and center */
+}
+
+/* Quick "pulse" animation to make it pop in */
+@keyframes pokePulse {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* Fade-out class triggered after 1 second */
+.fade-out {
+  opacity: 0;
+  transition: opacity 0.5s;
 }

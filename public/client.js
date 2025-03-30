@@ -152,8 +152,7 @@ const popSound = new Audio("pop.mp3");
 const bgmBoss = new Audio("boss.mp3");
 const bgmOIA = new Audio("oia.m4a");
 const bgmChill = new Audio("chill.m4a");
-const bgmAnime = new Audio("anime.m4a");
-const bgmTracks = [bgmBoss, bgmOIA, bgmChill, bgmAnime];
+const bgmTracks = [bgmBoss, bgmOIA, bgmChill];
 const availableColors = [
   "#FF0000", "#FF9900", "#FFFF00", "#00FF00", "#00FFFF",
   "#FF00FF", "#FFFFFF", "#FFD700", "#00BFFF", "#8A2BE2"
@@ -244,9 +243,6 @@ document.getElementById("bgmToggleOIA").addEventListener("change", (e) => {
 });
 document.getElementById("bgmToggleChill").addEventListener("change", (e) => {
   e.target.checked ? bgmChill.play() : bgmChill.pause();
-});
-document.getElementById("bgmToggleAnime").addEventListener("change", (e) => {
-  e.target.checked ? bgmAnime.play() : bgmAnime.pause();
 });
 document.getElementById("bgmVolume").addEventListener("input", (e) => {
   const vol = parseFloat(e.target.value);
@@ -379,27 +375,45 @@ socket.on("gameOver", (data) => {
   modals.gameOver.style.display = "flex";
   const gameOverModalContent = document.querySelector("#gameOverModal .modal-content");
 
+  // Remove any existing buttons first
   const existingPlayAgain = document.getElementById("playAgainBtn");
   if (existingPlayAgain) existingPlayAgain.remove();
+  const existingPoke = document.getElementById("pokeBtn");
+  if (existingPoke) existingPoke.remove();
   const existingQuit = document.getElementById("quitBtn");
   if (existingQuit) existingQuit.remove();
 
   if (isHost) {
+    // Host gets a "Play Again" button.
     const playAgainBtn = document.createElement("button");
     playAgainBtn.id = "playAgainBtn";
     playAgainBtn.textContent = "Play Again";
     playAgainBtn.className = "modal-btn";
     playAgainBtn.addEventListener("click", () => {
       socket.emit("startGame");
+      myScore = 0;
+      myScoreElem.textContent = `Your Score: 0`;
       modals.gameOver.style.display = "none";
     });
     gameOverModalContent.appendChild(playAgainBtn);
+  } else {
+    // Non-host players get a "Poke" button.
+    const pokeBtn = document.createElement("button");
+    pokeBtn.id = "pokeBtn";
+    pokeBtn.textContent = "Poke";
+    pokeBtn.className = "modal-btn";
+    pokeBtn.addEventListener("click", () => {
+      console.log("Poke button clicked – sending pokeHost event");
+      socket.emit("pokeHost");
+    });
+    gameOverModalContent.appendChild(pokeBtn);
   }
 
+  // In both cases, add a Quit button (with a smaller style)
   const quitBtn = document.createElement("button");
   quitBtn.id = "quitBtn";
   quitBtn.textContent = "Quit";
-  quitBtn.className = "modal-btn";
+  quitBtn.className = "modal-btn small-btn"; // add a new class for smaller styling
   quitBtn.addEventListener("click", () => {
     socket.emit("quitRoom");
     window.location.reload();
@@ -411,11 +425,133 @@ socket.on("hostDisconnected", () => {
   alert("The host has left the game. You will be returned to the main menu.");
   window.location.reload();
 });
-
-socket.on("gameReset", () => {
-  if (gameActive) {
-    socket.emit("requestRejoin");
+socket.on("pokeReceived", (data) => {
+  console.log("pokeReceived event on host side, data:", data);
+  if (isHost) {
+    showStickers(data.combo);
   }
+});
+socket.on("pokeCombo", (data) => {
+  if (!isHost) {
+    showPokeComboAnimation(data.combo);
+  }
+});
+
+function showPokeComboAnimation(combo) {
+  // Remove any existing combo indicator so we can show the new one
+  const existingIndicator = document.getElementById("pokeComboIndicator");
+  if (existingIndicator) {
+    existingIndicator.remove();
+  }
+
+  // Create a new div for the combo
+  const comboEl = document.createElement("div");
+  comboEl.id = "pokeComboIndicator";
+  comboEl.className = "poke-combo-indicator";
+  comboEl.textContent = `x${combo}`;
+
+  // Calculate a scale factor: +0.1 per combo, up to 2.0
+  let scale = 1 + Math.min(combo, 10) * 0.1;
+  if (scale > 2) scale = 2; // clamp max scale
+
+  // Apply initial transform to center & scale
+  // We'll let the CSS animation do a quick "pulse," then settle on this scale
+  comboEl.style.transform = `translate(-50%, -50%) scale(${scale})`;
+
+  document.body.appendChild(comboEl);
+
+  // After 1 second, fade out
+  setTimeout(() => {
+    comboEl.classList.add("fade-out");
+    setTimeout(() => {
+      comboEl.remove();
+    }, 500);
+  }, 1000);
+}
+// Function to create a sticker pop-out effect
+function showStickers(combo) {
+  // Define possible words and fun font families (make sure to import these fonts in your HTML)
+  const words = ["GO", "HURRY", "START", "WTF", "HELLO", "LET'S GO", "MOVE IT", "CHARGE", "RUSH", "NOW"];
+  const fonts = [
+    "'Bangers', cursive",
+    "'Fredoka One', sans-serif",
+    "'Press Start 2P', cursive",
+    "'Chewy', cursive",
+    "'Luckiest Guy', cursive",
+    "Comic Sans MS",
+    "Impact"
+  ];
+
+  // Randomly choose a word and a font
+  const randomWord = words[Math.floor(Math.random() * words.length)];
+  const randomFont = fonts[Math.floor(Math.random() * fonts.length)];
+
+  // Create the sticker element
+  const sticker = document.createElement("div");
+  sticker.classList.add("sticker");
+  sticker.textContent = randomWord;
+  sticker.style.fontFamily = randomFont;
+  sticker.style.fontWeight = "bold";
+  
+  // Base font size is 50px; if combo exists, increase size (up to a max of 100px)
+  let baseSize = 50;
+  let fontSize = combo && combo > 1 ? Math.min(baseSize + combo * 5, 100) : baseSize;
+  sticker.style.fontSize = fontSize + "px";
+
+  // Optionally, display the combo as an overlay:
+  if (combo && combo > 1) {
+    const comboSpan = document.createElement("span");
+    comboSpan.classList.add("combo-count");
+    comboSpan.textContent = ` x${combo}`;
+    sticker.appendChild(comboSpan);
+  }
+  
+  // Use a safe margin so the sticker doesn't overflow
+  const safeMargin = 100; // Adjust as needed
+  // Position the sticker randomly within the viewport
+  sticker.style.position = "fixed";
+  sticker.style.left = Math.random() * (window.innerWidth - safeMargin) + "px";
+  sticker.style.top = Math.random() * (window.innerHeight - safeMargin) + "px";
+  sticker.style.zIndex = 1000;
+  
+  document.body.appendChild(sticker);
+  
+  // Fade out and remove after a short delay
+  setTimeout(() => {
+    sticker.classList.add("fade-out");
+    setTimeout(() => {
+      sticker.remove();
+    }, 1000);
+  }, 500);
+}
+
+
+socket.on("gameReset", (data) => {
+  // Update players and scores
+  players = data.players.reduce((acc, player) => {
+    acc[player.id] = player;
+    return acc;
+  }, {});
+
+  // Reset local score
+  if (players[socket.id]) {
+    myScore = players[socket.id].score;
+    myScoreElem.textContent = `Your Score: ${myScore}`;
+  }
+
+  // Update grid if provided
+  if (data.grid) {
+    grid = data.grid;
+  }
+
+  // Update timer if provided
+  if (data.timeLeft !== undefined) {
+    timeLeftElem.textContent = `Time Left: ${data.timeLeft}s`;
+  }
+
+  // Refresh the display
+  updateScoreboard();
+  autoScaleGrid();
 });
 function updateRoomCodeDisplay() {
   const gameInfo = document.getElementById("gameInfo");
@@ -524,17 +660,36 @@ function drawGame() {
 
   const rows = grid.length;
   const cols = grid[0].length;
+  ctx.strokeStyle = "rgba(96, 121, 102, 0.5)"; // softer net color
+  ctx.lineWidth = 1;
 
-  // Draw grid
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      let x = offsetX + c * cellSize;
-      let y = offsetY + r * cellSize;
-      ctx.strokeStyle = "#b2e6be";
-      ctx.strokeRect(x, y, cellSize, cellSize);
+  // Define net spacing factor: draw a line every 2 cells
+  const netSpacingFactor = 0.25;
+
+  // Draw vertical net lines
+  for (let c = 0; c <= cols; c += netSpacingFactor) {
+    // Ensure we draw the last line even if cols is not a multiple of netSpacingFactor
+    let x = offsetX + c * cellSize;
+    if (c > cols) {
+      x = offsetX + cols * cellSize;
     }
+    ctx.beginPath();
+    ctx.moveTo(x, offsetY);
+    ctx.lineTo(x, offsetY + rows * cellSize);
+    ctx.stroke();
   }
 
+  // Draw horizontal net lines
+  for (let r = 0; r <= rows; r += netSpacingFactor) {
+    let y = offsetY + r * cellSize;
+    if (r > rows) {
+      y = offsetY + rows * cellSize;
+    }
+    ctx.beginPath();
+    ctx.moveTo(offsetX, y);
+    ctx.lineTo(offsetX + cols * cellSize, y);
+    ctx.stroke();
+  }
   // Draw apples
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -587,7 +742,7 @@ function drawApple(x, y, value, alpha, scale) {
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = "red";
+  ctx.fillStyle = "#FF4655";
   ctx.beginPath();
   ctx.arc(x + cellSize / 2, y + cellSize / 2, radius, 0, 2 * Math.PI);
   ctx.fill();
@@ -628,7 +783,16 @@ function drawDroppedApples() {
     drawApple(x, y, apple.value, 1.0 - progress, 1.0 - progress * 0.5);
   }
 }
+// Back button functionality
+document.getElementById('backFromCreate').addEventListener('click', () => {
+  document.getElementById('createRoomModal').style.display = 'none';
+  document.getElementById('initialModal').style.display = 'flex';
+});
 
+document.getElementById('backFromJoin').addEventListener('click', () => {
+  document.getElementById('joinRoomModal').style.display = 'none';
+  document.getElementById('initialModal').style.display = 'flex';
+});
 function updatePlayerList(players) {
   const list = document.getElementById("playerList");
   list.innerHTML = players
@@ -901,12 +1065,58 @@ window.addEventListener("load", () => {
     setTimeout(handleResize, 300);
   });
 });
-
+document.getElementById('waitOverlayBackBtn').addEventListener('click', () => {
+  // Hide game container and show initial modal
+  document.getElementById('gameContainer').style.display = 'none';
+  document.getElementById('initialModal').style.display = 'flex';
+  
+  // Leave the room if connected
+  if (socket.connected && currentRoom) {
+    socket.emit('quitRoom');
+    currentRoom = '';
+  }
+  
+  // Reset game state
+  gameActive = false;
+  grid = [];
+  players = {};
+  myScore = 0;
+});
+document.getElementById('backFromLobby').addEventListener('click', () => {
+  // Leave the room
+  if (currentRoom) {
+    socket.emit('quitRoom');
+    currentRoom = '';
+  }
+  
+  // Return to initial screen
+  document.getElementById('lobbyModal').style.display = 'none';
+  document.getElementById('initialModal').style.display = 'flex';
+});
 // Reset button functionality
-resetButton.addEventListener("click", () => {
+document.getElementById("resetButton").addEventListener("click", () => {
   if (isHost) {
-    socket.emit("startGame");
+    // Reset all scores immediately
+    Object.values(players).forEach(player => {
+      player.score = 0;
+    });
+    myScore = 0;
+    myScoreElem.textContent = `Your Score: ${myScore}`;
+    
+    // Update the scoreboard immediately
+    updateScoreboard();
+    
+    // Emit reset event to server
+    socket.emit("resetGame");
+    
+    // If game is active, also reset the grid
+    if (gameActive) {
+      socket.emit("startGame"); // This will create a new grid
+    }
   } else {
+    // For non-hosts, just reset their own score display
+    myScore = 0;
+    myScoreElem.textContent = `Your Score: ${myScore}`;
     socket.emit("requestRejoin");
   }
 });
