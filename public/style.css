@@ -390,3 +390,64 @@ input[type="range"] {
     padding: 0.8rem 1.2rem;
   }
 }
+#bmc-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: #FFDD00;
+  color: #000;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: bold;
+  padding: 0.7rem 1.2rem;
+  border-radius: 8px;
+  text-decoration: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+  z-index: 2000;
+}
+
+#bmc-button:hover {
+  transform: scale(1.1);
+  background-color: #FFC700;
+}
+.adsense-side {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 120px;
+  height: 600px;
+  background: #1A1E24;
+  color: #ccc;
+  border: 1px dashed #FF4655;
+  text-align: center;
+  padding: 0.5rem;
+  font-family: 'Rajdhani', sans-serif;
+  z-index: 1000;
+}
+
+.adsense-left {
+  left: 0;
+}
+
+.adsense-right {
+  right: 0;
+}
+
+.adsense-box {
+  margin: 1rem auto;
+  text-align: center;
+  border: 1px dashed #FF4655;
+  padding: 1rem;
+  max-width: 400px;
+  color: #ccc;
+  background: #1A1E24;
+  border-radius: 8px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 768px) {
+  .adsense-side {
+    display: none;
+  }
+}
