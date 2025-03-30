@@ -419,16 +419,31 @@ socket.on("gameReset", () => {
 });
 function updateRoomCodeDisplay() {
   const gameInfo = document.getElementById("gameInfo");
-  const roomCodeSpan = document.createElement("span");
-  roomCodeSpan.id = "roomCodeDisplayInGame";
-  roomCodeSpan.textContent = currentRoom;
-  roomCodeSpan.style.margin = "0 auto";
 
   const existing = document.getElementById("roomCodeDisplayInGame");
   if (existing) existing.remove();
 
-  gameInfo.insertBefore(roomCodeSpan, gameInfo.firstChild.nextSibling);
+  const wrapper = document.createElement("span");
+  wrapper.id = "roomCodeDisplayInGame";
+  wrapper.style.margin = "0 auto";
+  wrapper.style.display = "inline-flex";
+  wrapper.style.alignItems = "center";
+  wrapper.style.gap = "0.3rem";
+
+  const codeSpan = document.createElement("span");
+  codeSpan.textContent = currentRoom;
+
+  const icon = document.createElement("span");
+  icon.id = "copyIcon";
+  icon.className = "copy-icon";
+  icon.textContent = "content_copy";
+
+  wrapper.appendChild(codeSpan);
+  wrapper.appendChild(icon);
+
+  gameInfo.insertBefore(wrapper, gameInfo.firstChild.nextSibling);
 }
+
 socket.on("updateCursor", (data) => {
   remoteCursors[data.playerId] = data;
 });
@@ -849,31 +864,33 @@ function sendCursorUpdate() {
 
 
 // Copy room code functionality
-document.getElementById('copyIcon').addEventListener('click', function() {
-  const roomCode = document.getElementById('roomCodeDisplayInGame').textContent;
-  
-  const tempInput = document.createElement('input');
+document.addEventListener("click", function (e) {
+  const icon = e.target.closest(".copy-icon");
+  if (!icon) return;
+
+  const roomCode = document.querySelector("#roomCodeDisplayInGame span:first-child").textContent;
+
+  const tempInput = document.createElement("input");
   tempInput.value = roomCode;
   document.body.appendChild(tempInput);
   tempInput.select();
-  
+
   try {
-    document.execCommand('copy');
-    
-    const icon = document.getElementById('copyIcon');
-    icon.textContent = '✓';
-    icon.style.color = '#2ecc71';
-    
+    document.execCommand("copy");
+    icon.textContent = "✓";
+    icon.style.color = "#2ecc71";
+
     setTimeout(() => {
-      icon.textContent = '⎘';
-      icon.style.color = '#3498db';
+      icon.textContent = "content_copy";
+      icon.style.color = "#FF4655"; // matches theme
     }, 2000);
   } catch (err) {
-    console.error('Failed to copy text: ', err);
+    console.error("Failed to copy text: ", err);
   }
-  
+
   document.body.removeChild(tempInput);
 });
+
 
 // Initialize
 window.addEventListener("load", () => {

@@ -1,21 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Fruit Box Multiplayer</title>
+  <title>MatchSum: Tactical Grid</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <!-- Initial Modal -->
+<body class="valorant-theme">
   <div id="initialModal" class="modal" style="display: flex;">
     <div class="modal-content">
       <button id="createRoomBtn" class="modal-btn">Create Room</button>
       <button id="joinExistingBtn" class="modal-btn">Join Room</button>
     </div>
   </div>
-
-  <!-- Create Room Modal -->
   <div id="createRoomModal" class="modal">
     <div class="modal-content">
       <h2>Create Room</h2>
@@ -23,8 +23,6 @@
       <button id="confirmCreateRoom" class="modal-btn">Create</button>
     </div>
   </div>
-
-  <!-- Join Room Modal -->
   <div id="joinRoomModal" class="modal">
     <div class="modal-content">
       <h2>Join Room</h2>
@@ -33,43 +31,39 @@
       <button id="confirmJoinRoom" class="modal-btn">Join</button>
     </div>
   </div>
-
-  <!-- Lobby Modal -->
   <div id="lobbyModal" class="modal">
     <div class="modal-content">
-      <h2>Room Code: <span id="roomCodeDisplay"></span></h2>
+      <h2 class="room-code-label">
+        Room Code:
+        <span id="roomCodeDisplayWrapper">
+          <span id="roomCodeDisplay"></span>
+          <span id="copyIcon" class="copy-icon material-icons">content_copy</span>
+        </span>
+      </h2>
       <h3>Players:</h3>
-      <ul id="playerList"></ul>
+      <ul id="playerList" class="player-list"></ul>      
       <button id="startGameBtn" class="modal-btn" disabled>Start Game</button>
     </div>
   </div>
-
-  <!-- Game Container -->
   <div id="frame">
     <div id="gameContainer">
       <div id="waitOverlay">
         <div class="wait-message">Waiting for next game...</div>
       </div>
-      <div id="gameHeader" 
-     ontouchstart="return false" 
-     onselectstart="return false" 
-     style="-webkit-touch-callout: none;">
+      <div id="gameHeader">
         <div id="scoreboard"></div>
         <div id="gameInfo">
-          <span id="roomCodeDisplayInGame"></span>
-          <span id="copyIcon" class="copy-icon">⎘</span>
+          <span id="roomCodeDisplayInGame">
+            <span>JEF5E1</span>
+            <span class="copy-icon material-icons">content_copy</span>
+          </span>
           <span id="timeLeft">Time Left: 0s</span>
           <span id="yourScore">Your Score: 0</span>
+        </div>
       </div>
-    </div>
-    <canvas id="gameCanvas"></canvas>
-      <!-- <div id="scoreboard"></div>
-      <div id="gameInfo">
-        <div id="timer">Time Left: <span id="timeLeft">0</span>s</div>
-        <div id="score">Your Score: <span id="yourScore">0</span></div>
-      </div> -->
+      <canvas id="gameCanvas"></canvas>
       <div id="bottomBar">
-        <button id="resetButton">Reset</button>
+        <button id="resetButton" class="modal-btn">Reset</button>
         <div id="toggles">
           <label><input type="checkbox" id="lightColors"> Light Colors</label>
           <label><input type="checkbox" id="bgmToggleBoss"> Boss</label>
@@ -81,17 +75,13 @@
         </div>
       </div>
     </div>
-    
-    <!-- Game Over Modal -->
     <div id="gameOverModal" class="modal">
-        <div class="modal-content">
-          <h2>Game Over!</h2>
-          <p id="finalScore"></p>
-          <!-- Buttons will be added dynamically -->
-        </div>
+      <div class="modal-content">
+        <h2>Game Over!</h2>
+        <p id="finalScore"></p>
       </div>
+    </div>
   </div>
-
   <script src="/socket.io/socket.io.js"></script>
   <script src="client.js"></script>
 </body>
