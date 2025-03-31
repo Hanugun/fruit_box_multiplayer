@@ -40,7 +40,40 @@ socket.on("forceGameState", (data) => {
   autoScaleGrid();
   updateScoreboard();
 });
+socket.on("lobbyNotification", (data) => {
+  if (isHost) {
+    showLobbyNotification(data.message);
+  }
+});
 
+function showLobbyNotification(message) {
+  const notification = document.createElement("div");
+  notification.className = "lobby-notification";
+  notification.textContent = message;
+  
+  // Basic inline styling for the notification
+  notification.style.position = "fixed";
+  notification.style.top = "10px";
+  notification.style.left = "10px";
+  notification.style.backgroundColor = "rgba(0, 0, 0, 0.7)";
+  notification.style.color = "#fff";
+  notification.style.padding = "8px 12px";
+  notification.style.borderRadius = "4px";
+  notification.style.zIndex = "2000";
+  notification.style.fontSize = "1rem";
+  notification.style.opacity = "1";
+  notification.style.transition = "opacity 0.5s ease";
+  
+  document.body.appendChild(notification);
+  
+  // Remove after 3 seconds by fading out
+  setTimeout(() => {
+    notification.style.opacity = "0";
+    setTimeout(() => {
+      notification.remove();
+    }, 500);
+  }, 3000);
+}
 // Connection handling
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -619,13 +652,12 @@ function updateScoreboard() {
   sortedPlayers.slice(0, 5).forEach((player, index) => {
     const color = getPlayerColor(player.id);
     html += `
-            <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
-                 style="border-color: ${color}">
-                <span class="medal">${["🥇", "🥈", "🥉"][index]}</span>
-                <span class="name" style="color: ${color}">${player.nickname}</span>
-                <span class="score">${player.score}</span>
-            </div>
-        `;
+      <div class="player-chip ${player.id === socket.id ? "you" : ""}" style="border-color: ${color}">
+        <span class="medal">${index < 3 ? ["🥇", "🥈", "🥉"][index] : ""}</span>
+        <span class="name" style="color: ${color}">${player.nickname}</span>
+        <span class="score">${player.score}</span>
+      </div>
+    `;
   });
 
   if (sortedPlayers.length > 5) {
@@ -635,7 +667,6 @@ function updateScoreboard() {
   html += `</div>`;
   scoreboardDiv.innerHTML = html;
 }
-
 function getPlayerColor(playerId) {
   if (playerColors[playerId]) {
     return playerColors[playerId];

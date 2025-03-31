@@ -106,54 +106,61 @@ io.on("connection", (socket) => {
   });
 
   // Join an existing room
- // Update the joinRoom handler
- socket.on("joinRoom", ({ roomCode, nickname }) => {
-  const room = rooms.get(roomCode.toUpperCase());
-  if (!room) return socket.emit("roomError", "Room not found");
-  
-  // Clear any existing status
-  room.players.delete(socket.id);
-  room.spectators.delete(socket.id);
-  
-  if (room.gameActive) {
-    // ALWAYS join as spectator during active game
-    room.spectators.add(socket.id);
-    socket.join(roomCode);
+  socket.on("joinRoom", ({ roomCode, nickname }) => {
+    socket.nickname = nickname; // Store the nickname on the socket
+    const room = rooms.get(roomCode.toUpperCase());
+    if (!room) return socket.emit("roomError", "Room not found");
     
-    socket.emit("forceGameState", {
-      roomCode: room.code,
-      grid: room.grid,
-      players: Array.from(room.players.values()),
-      timeLeft: room.timeLeft,
-      isSpectator: true,
-      canPlay: false,
-      message: "Wait till the next game starts..."
-    });
-  } else {
-    // Normal join as player when game isn't active
-    if (room.players.size >= room.maxPlayers) {
-      return socket.emit("roomError", "Room is full");
+    // Clear any existing status
+    room.players.delete(socket.id);
+    room.spectators.delete(socket.id);
+    
+    if (room.gameActive) {
+      // Always join as spectator during active game
+      room.spectators.add(socket.id);
+      socket.join(roomCode);
+      
+      socket.emit("forceGameState", {
+        roomCode: room.code,
+        grid: room.grid,
+        players: Array.from(room.players.values()),
+        timeLeft: room.timeLeft,
+        isSpectator: true,
+        canPlay: false,
+        message: "Wait till the next game starts..."
+      });
+    } else {
+      // Normal join as player when game isn't active
+      if (room.players.size >= room.maxPlayers) {
+        return socket.emit("roomError", "Room is full");
+      }
+      
+      room.players.set(socket.id, { 
+        id: socket.id, 
+        nickname,
+        score: 0,
+        isActive: true 
+      });
+  
+      socket.emit("roomJoined", {
+        roomCode,
+        players: Array.from(room.players.values()),
+        canPlay: true
+      });
+      
+      io.to(roomCode).emit("playerJoined", Array.from(room.players.values()));
     }
     
-    room.players.set(socket.id, { 
-      id: socket.id, 
-      nickname,
-      score: 0,
-      isActive: true 
-    });
-
-    socket.emit("roomJoined", {
-      roomCode,
-      players: Array.from(room.players.values()),
-      canPlay: true
-    });
+    // Notify the host
+    if (socket.id !== room.host) {
+      const role = room.gameActive ? 'as a spectator' : '';
+      io.to(room.host).emit("lobbyNotification", { message: `${nickname} joined the lobby ${role}` });
+    }
     
-    io.to(roomCode).emit("playerJoined", Array.from(room.players.values()));
-  }
-  currentRoom = roomCode;
-  socket.join(roomCode);
+    currentRoom = roomCode;
+    socket.join(roomCode);
+  });
   
-});
 // Add this new event handler
 socket.on("requestRejoin", () => {
   if (!currentRoom || !rooms.has(currentRoom)) {
