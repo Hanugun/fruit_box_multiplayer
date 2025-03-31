@@ -678,3 +678,63 @@ input[type="range"] {
   opacity: 0;
   transition: opacity 0.5s;
 }
+#timeBarContainer {
+  position: relative;
+  width: 90%;              /* Uses 90% of available space */
+  max-width: 450px;        /* But no wider than 450px */
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  margin: 0 1rem;          /* Spacing between Reset and toggles */
+  overflow: hidden;
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* The fill element */
+#timeBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;             /* Updated via JS */
+  background-color: #f8e44ebd;
+  transition: width 0.2s linear, background-color 0.2s;
+  border-radius: 4px;
+}
+
+/* Threshold lines at 33% and 66% */
+.thresholdLine {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.911);
+  pointer-events: none;
+  z-index: 1;
+}
+
+#thresholdLine1 {
+  left: 33%;
+}
+
+#thresholdLine2 {
+  left: 66%;
+}
+#settingsModal select, 
+#settingsModal input[type="number"] {
+  width: 100%;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+  background: #2A2E35;
+  border: 1px solid #3F444C;
+  color: #ECE8E1;
+  border-radius: 4px;
+}
+
+#settingsModal label {
+  display: block;
+  margin-top: 1rem;
+  color: #FF4655;
+  font-weight: bold;
+}

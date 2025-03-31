@@ -264,6 +264,11 @@ socket.on("roomJoined", ({ roomCode, players }) => {
 });
 
 document.getElementById("startGameBtn").addEventListener("click", () => {
+  // Optionally, if settings are stored in the UI, emit them first:
+  const level = document.getElementById("levelSelect").value;
+  const timer = parseInt(document.getElementById("timerInput").value, 10);
+  socket.emit("setGameSettings", { level, timer });
+  // Then start the game.
   socket.emit("startGame");
 });
 
@@ -394,11 +399,49 @@ socket.on("selectionSuccess", (data) => {
 socket.on("selectionFail", (data) => {
   console.log("Selection failed:", data.reason);
 });
+let totalTimeFromServer = 120;
+let lastServerTimeLeft = totalTimeFromServer;
+let serverUpdateTimestamp = Date.now();
+let hasReceivedFirstUpdate = false;
 
 socket.on("timerUpdate", (data) => {
+  totalTimeFromServer = data.totalTime;
+  lastServerTimeLeft = data.timeLeft;
+  serverUpdateTimestamp = Date.now();
+  hasReceivedFirstUpdate = true;
+  
   timeLeftElem.textContent = `Time Left: ${data.timeLeft}s`;
 });
 
+function animateTimeBar() {
+  const now = Date.now();
+  const elapsed = (now - serverUpdateTimestamp) / 1000;
+  
+  // If no update has been received, just show full bar
+  let smoothTimeLeft = hasReceivedFirstUpdate 
+    ? Math.max(0, lastServerTimeLeft - elapsed)
+    : totalTimeFromServer;
+  
+  const percent = (smoothTimeLeft / totalTimeFromServer) * 100;
+  const timeBar = document.getElementById("timeBar");
+  timeBar.style.width = percent + "%";
+  
+  // Recalculate thresholds dynamically
+  const currentThreshold1 = 0.66 * totalTimeFromServer;
+  const currentThreshold2 = 0.33 * totalTimeFromServer;
+  
+  if (smoothTimeLeft <= currentThreshold2) {
+    timeBar.style.backgroundColor = "#FF4655"; // Red
+  } else if (smoothTimeLeft <= currentThreshold1) {
+    timeBar.style.backgroundColor = "#FFC107"; // Yellow
+  } else {
+    timeBar.style.backgroundColor = "#F5E14C"; // Light yellow
+  }
+  
+  requestAnimationFrame(animateTimeBar);
+}
+
+animateTimeBar();
 socket.on("gameOver", (data) => {
   gameActive = false;
   resetSelection();
@@ -504,7 +547,7 @@ function showPokeComboAnimation(combo) {
 // Function to create a sticker pop-out effect
 function showStickers(combo) {
   // Define possible words and fun font families (make sure to import these fonts in your HTML)
-  const words = ["GO", "HURRY", "START", "WTF", "HELLO", "LET'S GO", "MOVE IT", "CHARGE", "RUSH", "NOW"];
+  const words = ["GO", "HURRY", "START", "WTF", "HELLO", "LET'S GO", "MOVE IT", "NOW"];
   const fonts = [
     "'Bangers', cursive",
     "'Fredoka One', sans-serif",
@@ -557,7 +600,17 @@ function showStickers(combo) {
     }, 1000);
   }, 500);
 }
-
+document.getElementById("openSettingsBtn").addEventListener("click", () => {
+  document.getElementById("settingsModal").style.display = "flex";
+});
+document.getElementById("saveSettingsBtn").addEventListener("click", () => {
+  // Get host-selected level and timer values from the UI.
+  const level = document.getElementById("levelSelect").value; // e.g., "normal"
+  const timer = parseInt(document.getElementById("timerInput").value, 10);
+  socket.emit("setGameSettings", { level, timer });
+  // Optionally, hide the settings modal after saving.
+  document.getElementById("settingsModal").style.display = "none";
+});
 
 socket.on("gameReset", (data) => {
   // Update players and scores

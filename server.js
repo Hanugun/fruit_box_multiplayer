@@ -9,10 +9,17 @@ const io = socketIO(server);
 
 app.use(express.static("public"));
 
-// Game configuration
-const GRID_ROWS = 13;
-const GRID_COLS = 20;
-const GAME_DURATION = 120; // 2 minutes
+
+const gridLevels = {
+  easy: { cols: 16 },
+  normal: { cols: 20 },    // Default: 20 columns, rows ≈ 13
+  hard: { cols: 24 },
+  extreme: { cols: 28 },
+  nightmare: { cols: 32 }
+};
+
+// Default timer (in seconds)
+const DEFAULT_TIMER = 120;
 const rooms = new Map();
 
 /**
@@ -25,43 +32,39 @@ function generateRoomCode() {
 /**
  * Create a uniform board where each digit from 1 to 9 appears roughly equally
  */
-function createGrid() {
-  const totalCells = GRID_ROWS * GRID_COLS;
+function createGrid(cols, rows) {
+  const totalCells = rows * cols;
   let numbers = [];
   const baseCount = Math.floor(totalCells / 9);
-
-  // Add each number (1..9) exactly baseCount times
   for (let n = 1; n <= 9; n++) {
     for (let i = 0; i < baseCount; i++) {
       numbers.push(n);
     }
   }
-
-  // Fill any remaining cells
   let remainder = totalCells - numbers.length;
-  let n = 1;
+  let digit = 1;
   while (remainder > 0) {
-    numbers.push(n);
-    n = (n % 9) + 1;
+    numbers.push(digit);
+    digit = (digit % 9) + 1;
     remainder--;
   }
-
-  // Shuffle the numbers
-  numbers = numbers.sort(() => Math.random() - 0.5);
-
-  // Build the 2D array
-  let board = [];
+  // Fisher-Yates shuffle
+  for (let i = numbers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+  }
+  // Build grid
+  const board = [];
   let idx = 0;
-  for (let r = 0; r < GRID_ROWS; r++) {
-    let row = [];
-    for (let c = 0; c < GRID_COLS; c++) {
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) {
       row.push(numbers[idx++]);
     }
     board.push(row);
   }
   return board;
 }
-
 /**
  * Calculate score based on combo length (triangular number)
  */
@@ -76,7 +79,7 @@ io.on("connection", (socket) => {
   socket.on("createRoom", ({ nickname }) => {
     const roomCode = generateRoomCode();
     const room = {
-      code: roomCode.toUpperCase(),
+      code: roomCode,
       host: socket.id,
       maxPlayers: 10,
       players: new Map(),
@@ -84,10 +87,11 @@ io.on("connection", (socket) => {
       gameActive: false,
       grid: null,
       timer: null,
-      timeLeft: GAME_DURATION,
+      timerDuration: DEFAULT_TIMER,
+      gridLevel: "normal",
+      timeLeft: DEFAULT_TIMER,
       pokeCombos: new Map(),
     };
-
     room.players.set(socket.id, {
       id: socket.id,
       nickname,
@@ -104,7 +108,28 @@ io.on("connection", (socket) => {
       players: Array.from(room.players.values()),
     });
   });
-
+  socket.on("setGameSettings", (settings) => {
+    const room = rooms.get(currentRoom);
+    if (!room || room.host !== socket.id) return;
+    
+    if (settings.level && gridLevels[settings.level]) {
+      room.gridLevel = settings.level;
+    }
+    
+    if (settings.timer && typeof settings.timer === "number") {
+      // Ensure timer is within reasonable bounds
+      room.timerDuration = Math.min(Math.max(settings.timer, 30), 600);
+    }
+    
+    // Update timeLeft to match new duration if game isn't active
+    if (!room.gameActive) {
+      room.timeLeft = room.timerDuration;
+    }
+    
+    io.to(room.code).emit("lobbyNotification", { 
+      message: "Game settings updated" 
+    });
+  });
   // Join an existing room
   socket.on("joinRoom", ({ roomCode, nickname }) => {
     socket.nickname = nickname; // Store the nickname on the socket
@@ -228,10 +253,14 @@ socket.on("quitRoom", () => {
   socket.on("startGame", () => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
-  
+
+    const level = room.gridLevel || "normal";
+    const cols = gridLevels[level].cols;
+    const rows = Math.round(cols * 0.65); // Maintain aspect ratio
     // Clear existing timer
     if (room.timer) clearInterval(room.timer);
-  
+
+    
     // Convert ALL spectators to players (if there's space)
     const spectatorIds = Array.from(room.spectators.keys());
     spectatorIds.forEach(spectatorId => {
@@ -256,13 +285,13 @@ socket.on("quitRoom", () => {
     });
   
     room.gameActive = true;
-    room.grid = createGrid();
-    room.timeLeft = GAME_DURATION;
-  
+    room.grid = createGrid(cols, rows);
+    room.timeLeft = room.timerDuration || DEFAULT_TIMER;
+
     // Start timer
     room.timer = setInterval(() => {
       room.timeLeft--;
-      io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
+      io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft, totalTime: room.timerDuration });
       if (room.timeLeft <= 0) {
         clearInterval(room.timer);
         endGame(room);
@@ -273,7 +302,9 @@ socket.on("quitRoom", () => {
     io.to(room.code).emit("gameStarted", {
       roomCode: room.code,
       grid: room.grid,
-      players: Array.from(room.players.values())
+      players: Array.from(room.players.values()),
+      level: room.gridLevel,
+      timer: room.timerDuration
     });
   
     // Force update state for everyone
@@ -353,7 +384,7 @@ socket.on("quitRoom", () => {
       if (room.timer) clearInterval(room.timer);
       room.timer = setInterval(() => {
         room.timeLeft--;
-        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft });
+        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft, totalTime: GAME_DURATION });
         if (room.timeLeft <= 0) {
           clearInterval(room.timer);
           endGame(room);
