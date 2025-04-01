@@ -1,4 +1,10 @@
-/* VALORANT UI THEME — FULLY DETAILED WITH RESPONSIVE AND CHIP STYLES */
+
+@font-face {
+  font-family: 'Rajdhani';
+  src: url('/fonts/rajdhani.woff2') format('woff2');
+  font-weight: 600; /* Matches your "wght@600" Google Fonts request */
+  font-display: swap; /* Ensures text renders immediately with fallback */
+}
 body.valorant-theme {
   margin: 0;
   padding: 0;

@@ -116,7 +116,6 @@ io.on("connection", (socket) => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
     
-    console.log("Received settings:", settings); // Add this
     
     if (settings.level && gridLevels[settings.level]) {
       room.gridLevel = settings.level;
@@ -127,7 +126,6 @@ io.on("connection", (socket) => {
     }
     
     if (settings.mods) {
-      console.log("Updating mods:", settings.mods); // Add this
       room.mods = {
         hidden: settings.mods.includes('hidden'),
         flashlight: settings.mods.includes('flashlight')
