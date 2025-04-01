@@ -91,6 +91,10 @@ io.on("connection", (socket) => {
       gridLevel: "normal",
       timeLeft: DEFAULT_TIMER,
       pokeCombos: new Map(),
+      mods: {
+        hidden: false,
+        flashlight: false
+      }
     };
     room.players.set(socket.id, {
       id: socket.id,
@@ -112,18 +116,22 @@ io.on("connection", (socket) => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
     
+    console.log("Received settings:", settings); // Add this
+    
     if (settings.level && gridLevels[settings.level]) {
       room.gridLevel = settings.level;
     }
     
-    if (settings.timer && typeof settings.timer === "number") {
-      // Ensure timer is within reasonable bounds
-      room.timerDuration = Math.min(Math.max(settings.timer, 30), 600);
+    if (settings.timer) {
+      room.timerDuration = Math.min(Math.max(settings.timer, 30), 300);
     }
     
-    // Update timeLeft to match new duration if game isn't active
-    if (!room.gameActive) {
-      room.timeLeft = room.timerDuration;
+    if (settings.mods) {
+      console.log("Updating mods:", settings.mods); // Add this
+      room.mods = {
+        hidden: settings.mods.includes('hidden'),
+        flashlight: settings.mods.includes('flashlight')
+      };
     }
     
     io.to(room.code).emit("lobbyNotification", { 
@@ -304,7 +312,8 @@ socket.on("quitRoom", () => {
       grid: room.grid,
       players: Array.from(room.players.values()),
       level: room.gridLevel,
-      timer: room.timerDuration
+      timer: room.timerDuration,
+      mods: room.mods,
     });
   
     // Force update state for everyone

@@ -147,6 +147,12 @@ let gameActive = false;
 let grid = [];
 let players = {};
 let myScore = 0;
+let flashlightPos = { x: 0.5, y: 0.5 }; // Start at center instead of (0,0)
+let appleAppearTimes = []; // 2D array matching grid dimensions
+let gameMods = {
+  hidden: false,
+  flashlight: false
+};
 
 // DOM elements
 const roomCodeDisplayElem = document.getElementById("roomCodeDisplay");
@@ -156,7 +162,9 @@ const myScoreElem = document.getElementById("yourScore");
 const scoreboardDiv = document.getElementById("scoreboard");
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
-
+let flashlightRadius = Math.min(canvas.width, canvas.height) * 0.6;
+let mouseX = canvas.width / 2;
+let mouseY = canvas.height / 2;
 // Grid sizing
 let cellSize = 50;
 let offsetX = 0;
@@ -321,7 +329,8 @@ socket.on("playerLeft", (players) => {
 socket.on("gameStarted", (gameState) => {
   const isPlayer = gameState.players.some(p => p.id === socket.id);
   gameActive = isPlayer;
-  
+  appleAppearTimes = grid.map(row => row.map(() => performance.now()));
+
   if (isPlayer) {
     document.getElementById("waitOverlay").style.display = "none";
     canvas.classList.remove("spectator");
@@ -337,7 +346,18 @@ socket.on("gameStarted", (gameState) => {
     acc[player.id] = player;
     return acc;
   }, {});
-
+  appleAppearTimes = [];
+  for (let r = 0; r < grid.length; r++) {
+    appleAppearTimes[r] = [];
+    for (let c = 0; c < grid[0].length; c++) {
+      appleAppearTimes[r][c] = performance.now();
+    }
+  }
+  gameMods = gameState.mods || { 
+    hidden: false, 
+    flashlight: false 
+  };
+  
   updateScoreboard();
   autoScaleGrid();
 });
@@ -394,6 +414,11 @@ socket.on("selectionSuccess", (data) => {
   });
 
   updateScoreboard();
+  data.removed.forEach(({ row, col }) => {
+    // When apples are removed, we'll assume new ones appear
+    // In a real game, you'd need to track when new apples spawn
+    appleAppearTimes[row][col] = performance.now();
+  });
 });
 
 socket.on("selectionFail", (data) => {
@@ -479,7 +504,6 @@ socket.on("gameOver", (data) => {
     pokeBtn.textContent = "Poke";
     pokeBtn.className = "modal-btn";
     pokeBtn.addEventListener("click", () => {
-      console.log("Poke button clicked – sending pokeHost event");
       socket.emit("pokeHost");
     });
     gameOverModalContent.appendChild(pokeBtn);
@@ -502,7 +526,6 @@ socket.on("hostDisconnected", () => {
   window.location.reload();
 });
 socket.on("pokeReceived", (data) => {
-  console.log("pokeReceived event on host side, data:", data);
   if (isHost) {
     showStickers(data.combo);
   }
@@ -604,11 +627,14 @@ document.getElementById("openSettingsBtn").addEventListener("click", () => {
   document.getElementById("settingsModal").style.display = "flex";
 });
 document.getElementById("saveSettingsBtn").addEventListener("click", () => {
-  // Get host-selected level and timer values from the UI.
-  const level = document.getElementById("levelSelect").value; // e.g., "normal"
+  const level = document.getElementById("levelSelect").value;
   const timer = parseInt(document.getElementById("timerInput").value, 10);
-  socket.emit("setGameSettings", { level, timer });
-  // Optionally, hide the settings modal after saving.
+  
+  const mods = [];
+  if (document.getElementById("modHidden").checked) mods.push("hidden");
+  if (document.getElementById("modFlashlight").checked) mods.push("flashlight");
+  
+  socket.emit("setGameSettings", { level, timer, mods });
   document.getElementById("settingsModal").style.display = "none";
 });
 
@@ -742,45 +768,117 @@ function drawGame() {
     return;
   }
 
+  if (gameMods.flashlight) {
+    // First draw the game elements normally (but we'll cover them)
+    drawGameElements();
+    
+    // Draw a dark overlay over the entire canvas
+    ctx.save();
+    ctx.fillStyle = 'rgb(0, 0, 0)'; // 85% opaque black
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Create the flashlight effect by cutting a hole in the overlay
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, flashlightRadius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Add a subtle glow effect around the flashlight
+    ctx.globalCompositeOperation = 'lighter';
+    const gradient = ctx.createRadialGradient(
+      mouseX, mouseY, flashlightRadius * 0.7,
+      mouseX, mouseY, flashlightRadius
+    );
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0.1)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, flashlightRadius, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.restore();
+    
+    // Redraw game elements inside the flashlight area with full brightness
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, flashlightRadius, 0, Math.PI * 2);
+    ctx.clip();
+    drawGameElements();
+    ctx.restore();
+  } else {
+    // Normal drawing when flashlight is off
+    drawGameElements();
+  }
+
+  requestAnimationFrame(drawGame);
+}
+
+function drawGameElements() {
+  // Draw mod text indicator
+  if (gameMods.hidden || gameMods.flashlight) {
+    ctx.save();
+    ctx.fillStyle = "#FF4655";
+    ctx.font = "bold 16px Arial";
+    ctx.textAlign = "left";
+    
+    let modText = "";
+    if (gameMods.hidden) modText += "HD";
+    if (gameMods.flashlight) modText += (modText ? "+" : "") + "FL";
+    
+    ctx.fillText(modText, 10, 30);
+    ctx.restore();
+  }
+
   const rows = grid.length;
   const cols = grid[0].length;
-  ctx.strokeStyle = "rgba(96, 121, 102, 0.5)"; // softer net color
+  ctx.strokeStyle = "rgba(96, 121, 102, 0.5)";
   ctx.lineWidth = 1;
 
-  // Define net spacing factor: draw a line every 2 cells
+  // Draw grid lines
   const netSpacingFactor = 0.25;
-
-  // Draw vertical net lines
   for (let c = 0; c <= cols; c += netSpacingFactor) {
-    // Ensure we draw the last line even if cols is not a multiple of netSpacingFactor
     let x = offsetX + c * cellSize;
-    if (c > cols) {
-      x = offsetX + cols * cellSize;
-    }
+    if (c > cols) x = offsetX + cols * cellSize;
     ctx.beginPath();
     ctx.moveTo(x, offsetY);
     ctx.lineTo(x, offsetY + rows * cellSize);
     ctx.stroke();
   }
 
-  // Draw horizontal net lines
   for (let r = 0; r <= rows; r += netSpacingFactor) {
     let y = offsetY + r * cellSize;
-    if (r > rows) {
-      y = offsetY + rows * cellSize;
-    }
+    if (r > rows) y = offsetY + rows * cellSize;
     ctx.beginPath();
     ctx.moveTo(offsetX, y);
     ctx.lineTo(offsetX + cols * cellSize, y);
     ctx.stroke();
   }
+
   // Draw apples
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  const currentTime = performance.now();
+  const hiddenFadeTime = 2000;
+  const hiddenDelay = 1000;
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[0].length; c++) {
       if (grid[r][c] > 0 && !removingApples.some((a) => a.row === r && a.col === c)) {
         let x = offsetX + c * cellSize;
         let y = offsetY + r * cellSize;
-        drawApple(x, y, grid[r][c], 1.0, 1.0);
+        
+        let alpha = 1.0;
+        let scale = 1.0;
+        const isSelected = selection.highlightedCells.some(cell => cell.row === r && cell.col === c);
+        
+        if (gameMods.hidden) {
+          const appleAge = currentTime - appleAppearTimes[r][c];
+          if (appleAge > hiddenDelay) {
+            alpha = 1.0 - Math.min(1.0, (appleAge - hiddenDelay) / hiddenFadeTime);
+            scale = 1.0 - (1.0 - alpha) * 0.5;
+          }
+        }
+        
+        if (alpha > 0.01 || isSelected) {
+          drawApple(x, y, grid[r][c], isSelected ? 1.0 : alpha, isSelected ? 1.0 : scale);
+        }
       }
     }
   }
@@ -790,20 +888,18 @@ function drawGame() {
 
   // Draw selection
   drawSelection();
-
-  // Draw remote cursors and selections
+  
+  // Draw remote cursors
   for (let pid in remoteCursors) {
     let data = remoteCursors[pid];
     const color = getPlayerColor(pid);
     
-    // Draw cursor
     ctx.save();
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(data.x * canvas.width, data.y * canvas.height, 5, 0, 2 * Math.PI);
     ctx.fill();
     
-    // Draw selection if dragging
     if (data.isDragging && data.selection) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -816,14 +912,22 @@ function drawGame() {
     }
     ctx.restore();
   }
-
-  requestAnimationFrame(drawGame);
 }
 
 function drawApple(x, y, value, alpha, scale) {
   const minRadius = 1;
   const radius = Math.max(minRadius, (cellSize / 2 - 5) * scale);
-
+  if (gameMods.hidden && alpha < 0.3) {
+    // Draw a faint outline for memory aid
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.strokeStyle = "#FF4655";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + cellSize / 2, y + cellSize / 2, cellSize / 2 - 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.fillStyle = "#FF4655";
@@ -917,6 +1021,7 @@ function handleResize() {
     const container = document.getElementById("gameContainer");
     canvas.width = container.clientWidth - 20;
     canvas.height = container.clientHeight - 20;
+    flashlightRadius = Math.min(canvas.width, canvas.height) * 0.3;
     autoScaleGrid();
   }
 }
@@ -948,13 +1053,16 @@ function handleTouchMove(e) {
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
   
+  // Use the same scaling calculation for touch events
+  mouseX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+  mouseY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+  
   selection.currentX = (touch.clientX - rect.left) / rect.width;
   selection.currentY = (touch.clientY - rect.top) / rect.height;
 
   updateSelectionValidity();
   sendCursorUpdate();
 }
-
 function handleTouchEnd(e) {
   if (!gameActive || !selection.isActive) return;
   e.preventDefault();
@@ -982,19 +1090,28 @@ canvas.addEventListener("mousedown", (e) => {
   updateSelectionValidity();
   sendCursorUpdate();
 });
-
+// Add this to your initialization code
+canvas.addEventListener("mouseenter", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = e.clientX - rect.left;
+  mouseY = e.clientY - rect.top;
+});
 canvas.addEventListener("mousemove", (e) => {
-  if (!gameActive || !selection.isActive) return;
+  if (!gameActive) return;
 
   const rect = canvas.getBoundingClientRect();
+  // Calculate mouse position relative to canvas with proper scaling
+  mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+  mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
   
-  selection.currentX = (e.clientX - rect.left) / rect.width;
-  selection.currentY = (e.clientY - rect.top) / rect.height;
-
-  updateSelectionValidity();
-  sendCursorUpdate();
+  // Only update selection if mouse button is pressed
+  if (selection.isActive) {
+    selection.currentX = (e.clientX - rect.left) / rect.width;
+    selection.currentY = (e.clientY - rect.top) / rect.height;
+    updateSelectionValidity();
+    sendCursorUpdate();
+  }
 });
-
 window.addEventListener("mouseup", () => {
   if (!gameActive || !selection.isActive) return;
 
@@ -1090,12 +1207,21 @@ function resetSelection() {
   selection.isActive = false;
   selection.isValid = false;
   selection.highlightedCells = [];
+  selection.startX = 0;
+  selection.startY = 0;
+  selection.currentX = 0;
+  selection.currentY = 0;
 }
 
 function sendCursorUpdate() {
   if (!gameActive) return;
 
   const rect = canvas.getBoundingClientRect();
+  flashlightPos = {
+    x: selection.currentX,
+    y: selection.currentY
+  };
+
   socket.emit("playerCursor", {
     x: selection.currentX,
     y: selection.currentY,

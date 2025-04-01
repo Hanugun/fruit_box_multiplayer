@@ -738,3 +738,38 @@ input[type="range"] {
   color: #FF4655;
   font-weight: bold;
 }
+/* Add to CSS */
+.mods-section {
+  margin: 1.5rem 0;
+  border-top: 1px solid #3F444C;
+  padding-top: 1rem;
+}
+
+.mod-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.mod-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.mod-checkbox input {
+  margin-top: 0.2rem;
+}
+
+.mod-label {
+  font-weight: bold;
+  color: #FF4655;
+}
+
+.mod-description {
+  font-size: 0.8rem;
+  color: #888;
+  margin-left: 0.3rem;
+}
