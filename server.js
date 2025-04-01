@@ -378,7 +378,7 @@ socket.on("quitRoom", () => {
     // Reset the grid if game is active
     if (room.gameActive) {
       room.grid = createGrid();
-      room.timeLeft = GAME_DURATION;
+      room.timeLeft = room.timerDuration || DEFAULT_TIMER;
       
       // Reset and restart timer
       if (room.timer) clearInterval(room.timer);
