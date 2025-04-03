@@ -20,6 +20,7 @@ const gridLevels = {
 
 // Default timer (in seconds)
 const DEFAULT_TIMER = 120;
+const COMBO_DURATION = 3000;
 const rooms = new Map();
 
 /**
@@ -68,8 +69,10 @@ function createGrid(cols, rows) {
 /**
  * Calculate score based on combo length (triangular number)
  */
-function calculateScore(length) {
-  return Math.floor((length * (length + 1)) / 2);
+function calculateScore(length,combo) {
+  const baseScore = length; // Simple length-based scoring
+  const comboBonus = [0, 1, 2, 3, 4][combo - 1] || 0; // +1, +2, +3, +4 for x2, x3, x4, x5
+  return baseScore + comboBonus;
 }
 
 io.on("connection", (socket) => {
@@ -94,7 +97,8 @@ io.on("connection", (socket) => {
       mods: {
         hidden: false,
         flashlight: false
-      }
+      },
+      playerCombos: new Map()
     };
     room.players.set(socket.id, {
       id: socket.id,
@@ -194,40 +198,26 @@ io.on("connection", (socket) => {
   
 // Add this new event handler
 socket.on("requestRejoin", () => {
-  if (!currentRoom || !rooms.has(currentRoom)) {
-    socket.emit("roomError", "Room not found");
-    return;
-  }
-
+  if (!currentRoom || !rooms.has(currentRoom)) return socket.emit("roomError", "Room not found");
   const room = rooms.get(currentRoom);
-  
-  // Check if player was previously in this room
   const wasPlayer = room.players.has(socket.id);
   const wasSpectator = room.spectators.has(socket.id);
-
   if (wasPlayer || wasSpectator) {
     socket.join(room.code);
-    
     if (room.gameActive) {
-      // Send full game state
       socket.emit("forceGameState", {
         grid: room.grid,
-        players: Array.from(room.players.values()),
+        players: Array.from(room.players.values()).map(p => ({
+          ...p,
+          comboLevel: room.playerCombos.get(p.id)?.level || 1
+        })),
         timeLeft: room.timeLeft,
-        isSpectator: wasSpectator
+        isSpectator: wasSpectator,
+        playerCombos: Object.fromEntries(room.playerCombos)
       });
-      
-      if (wasPlayer) {
-        // Reactivate player if they were disconnected
-        const player = room.players.get(socket.id);
-        if (player) player.isActive = true;
-      }
+      if (wasPlayer) room.players.get(socket.id).isActive = true;
     } else {
-      // If game isn't active, just put them back in the lobby
-      socket.emit("roomJoined", {
-        roomCode: room.code,
-        players: Array.from(room.players.values())
-      });
+      socket.emit("roomJoined", { roomCode: room.code, players: Array.from(room.players.values()) });
     }
   } else {
     socket.emit("roomError", "Not previously in this room");
@@ -259,90 +249,88 @@ socket.on("quitRoom", () => {
   socket.on("startGame", () => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
-
     const level = room.gridLevel || "normal";
     const cols = gridLevels[level].cols;
-    const rows = Math.round(cols * 0.65); // Maintain aspect ratio
-    // Clear existing timer
+    const rows = Math.round(cols * 0.65);
     if (room.timer) clearInterval(room.timer);
-
-    
-    // Convert ALL spectators to players (if there's space)
     const spectatorIds = Array.from(room.spectators.keys());
     spectatorIds.forEach(spectatorId => {
       if (room.players.size < room.maxPlayers) {
         const spectatorSocket = io.sockets.sockets.get(spectatorId);
         if (spectatorSocket) {
-          room.players.set(spectatorId, {
-            id: spectatorId,
-            nickname: spectatorSocket.nickname || `Player ${room.players.size + 1}`,
-            score: 0,
-            isActive: true
-          });
+          room.players.set(spectatorId, { id: spectatorId, nickname: spectatorSocket.nickname || `Player ${room.players.size + 1}`, score: 0, isActive: true });
           room.spectators.delete(spectatorId);
         }
       }
     });
-  
-    // Reset game state for all players
-    room.players.forEach(player => {
-      player.score = 0;
-      player.isActive = true; // Ensure all players are active
-    });
-  
+    room.players.forEach(player => { player.score = 0; player.isActive = true; });
     room.gameActive = true;
     room.grid = createGrid(cols, rows);
     room.timeLeft = room.timerDuration || DEFAULT_TIMER;
-
-    // Start timer
+    room.playerCombos.clear(); // Reset combos at game start
+    room.players.forEach(player => room.playerCombos.set(player.id, { level: 1, lastSelection: 0 }));
     room.timer = setInterval(() => {
       room.timeLeft--;
+      
+      // Check and reset expired combos
+      const now = Date.now();
+      room.playerCombos.forEach((comboData, playerId) => {
+        if (now - comboData.lastSelection >= COMBO_DURATION && comboData.level > 1) {
+          comboData.level = 1; // Reset to 1 when combo expires
+          room.playerCombos.set(playerId, { ...comboData, level: 1 });
+        }
+      });
+  
       io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft, totalTime: room.timerDuration });
+      io.to(room.code).emit("gameState", {
+        grid: room.grid,
+        players: Array.from(room.players.values()).map(p => ({
+          ...p,
+          comboLevel: room.playerCombos.get(p.id)?.level || 1
+        })),
+        playerCombos: Object.fromEntries(room.playerCombos)
+      });
+  
       if (room.timeLeft <= 0) {
         clearInterval(room.timer);
         endGame(room);
       }
     }, 1000);
   
-    // Notify all clients
     io.to(room.code).emit("gameStarted", {
       roomCode: room.code,
       grid: room.grid,
-      players: Array.from(room.players.values()),
+      players: Array.from(room.players.values()).map(p => ({
+        ...p,
+        comboLevel: room.playerCombos.get(p.id)?.level || 1
+      })),
       level: room.gridLevel,
       timer: room.timerDuration,
       mods: room.mods,
+      playerCombos: Object.fromEntries(room.playerCombos)
     });
-  
-    // Force update state for everyone
     io.to(room.code).emit("forceGameState", {
       grid: room.grid,
-      players: Array.from(room.players.values()),
+      players: Array.from(room.players.values()).map(p => ({
+        ...p,
+        comboLevel: room.playerCombos.get(p.id)?.level || 1
+      })),
       timeLeft: room.timeLeft,
       isSpectator: false,
       canPlay: true,
-      message: ""
+      message: "",
+      playerCombos: Object.fromEntries(room.playerCombos)
     });
   });
   // Handle apple selection attempts
   socket.on("selectApples", (data) => {
-    if (!currentRoom) {
-      return socket.emit("selectionFail", { reason: "Not in a room" });
-    }
+    if (!currentRoom) return socket.emit("selectionFail", { reason: "Not in a room" });
     const room = rooms.get(currentRoom);
-    if (!room || !room.gameActive) {
-      return socket.emit("selectionFail", { reason: "Game not active" });
-    }
-  
+    if (!room || !room.gameActive) return socket.emit("selectionFail", { reason: "Game not active" });
     const player = room.players.get(socket.id);
-    if (!player || !player.isActive) {
-      return socket.emit("selectionFail", { reason: "Player not active" });
-    }
-  
+    if (!player || !player.isActive) return socket.emit("selectionFail", { reason: "Player not active" });
     let sum = 0;
     let validCells = [];
-
-    // Validate selected cells
     for (let cell of data.cells) {
       const { row, col } = cell;
       if (room.grid[row] && room.grid[row][col] && room.grid[row][col] > 0) {
@@ -350,119 +338,110 @@ socket.on("quitRoom", () => {
         validCells.push({ row, col });
       }
     }
-
-    // If selection sums to 10 and has at least one cell
     if (sum === 10 && validCells.length > 0) {
-      // Clear the selected cells
-      validCells.forEach(({ row, col }) => {
-        room.grid[row][col] = 0;
-      });
-
-      // Update player score
-      const player = room.players.get(socket.id);
-      player.score += calculateScore(validCells.length);
-
-      // Notify all players of successful selection
+      validCells.forEach(({ row, col }) => { room.grid[row][col] = 0; });
+      const now = Date.now();
+      let comboData = room.playerCombos.get(socket.id) || { level: 1, lastSelection: 0 };
+      const isCombo = now - comboData.lastSelection < COMBO_DURATION;
+      if (isCombo && comboData.level < 5) comboData.level++;
+      else if (!isCombo) comboData.level = 1;
+      comboData.lastSelection = now;
+      room.playerCombos.set(socket.id, comboData);
+      const length = validCells.length;
+      const score = calculateScore(length, comboData.level);
+      player.score += score;
       io.to(room.code).emit("selectionSuccess", {
         removed: validCells,
         playerId: socket.id,
         newScore: player.score,
+        comboLevel: comboData.level
+      });
+      io.to(room.code).emit("gameState", {
+        grid: room.grid,
+        players: Array.from(room.players.values()).map(p => ({
+          ...p,
+          comboLevel: room.playerCombos.get(p.id)?.level || 1
+        })),
+        playerCombos: Object.fromEntries(room.playerCombos)
       });
     } else {
-      // Notify player of failed selection
+      room.playerCombos.set(socket.id, { level: 1, lastSelection: 0 });
+    
+      // Emit both selectionFail and gameState to ensure client is in sync
       socket.emit("selectionFail", { reason: "Invalid selection" });
+      socket.emit("gameState", {
+        grid: room.grid,
+        players: Array.from(room.players.values()).map(p => ({
+          ...p,
+          comboLevel: room.playerCombos.get(p.id)?.level || 1
+        })),
+        playerCombos: Object.fromEntries(room.playerCombos)
+      });
     }
   });
   socket.on("resetGame", () => {
     const room = rooms.get(currentRoom);
     if (!room || room.host !== socket.id) return;
-  
-    // Reset all player scores
-    room.players.forEach(player => {
-      player.score = 0;
-    });
-  
-    // Reset the grid if game is active
+    room.players.forEach(player => { player.score = 0; });
     if (room.gameActive) {
       room.grid = createGrid();
       room.timeLeft = room.timerDuration || DEFAULT_TIMER;
-      
-      // Reset and restart timer
       if (room.timer) clearInterval(room.timer);
       room.timer = setInterval(() => {
         room.timeLeft--;
-        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft, totalTime: GAME_DURATION });
+        io.to(room.code).emit("timerUpdate", { timeLeft: room.timeLeft, totalTime: DEFAULT_TIMER });
         if (room.timeLeft <= 0) {
           clearInterval(room.timer);
           endGame(room);
         }
       }, 1000);
     }
-  
-    // Broadcast the full reset state to all clients
+    room.playerCombos.clear();
+    room.players.forEach(player => room.playerCombos.set(player.id, { level: 1, lastSelection: 0 }));
     io.to(room.code).emit("gameReset", {
-      players: Array.from(room.players.values()),
+      players: Array.from(room.players.values()).map(p => ({
+        ...p,
+        comboLevel: room.playerCombos.get(p.id)?.level || 1
+      })),
       grid: room.grid,
-      timeLeft: room.timeLeft
+      timeLeft: room.timeLeft,
+      playerCombos: Object.fromEntries(room.playerCombos)
     });
   });
   socket.on("playerCursor", (data) => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-
-    socket.to(room.code).emit("updateCursor", {
-      playerId: socket.id,
-      ...data,
-    });
+    socket.to(room.code).emit("updateCursor", { playerId: socket.id, ...data });
   });
   socket.on("pokeHost", () => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-    const TIMEOUT = 2000; // milliseconds for combo threshold
+    const TIMEOUT = 2000;
     const now = Date.now();
-  
-    // Retrieve or initialize combo data for this sender
     let comboData = room.pokeCombos.get(socket.id) || { count: 0, lastTime: 0 };
-  
-    // If the last poke was within the threshold, increment; otherwise, reset
-    if (now - comboData.lastTime < TIMEOUT) {
-      comboData.count++;
-    } else {
-      comboData.count = 1;
-    }
+    if (now - comboData.lastTime < TIMEOUT) comboData.count++;
+    else comboData.count = 1;
     comboData.lastTime = now;
     room.pokeCombos.set(socket.id, comboData);
-  
-    // Forward the poke to the host with the combo count
-    if (room.host) {
-      io.to(room.host).emit("pokeReceived", { from: socket.id, combo: comboData.count });
-    }
-  
-    // Also send the combo count back to the poking (non-host) player
+    if (room.host) io.to(room.host).emit("pokeReceived", { from: socket.id, combo: comboData.count });
     socket.emit("pokeCombo", { combo: comboData.count });
   });
   // Handle disconnections
   socket.on("disconnect", () => {
     const room = rooms.get(currentRoom);
     if (!room) return;
-
     if (room.players.has(socket.id)) {
       const wasHost = room.host === socket.id;
       room.players.delete(socket.id);
       if (wasHost) {
-        // Notify all players that host has left
         io.to(room.code).emit("hostDisconnected");
-
-        // Clean up room if host was the only player
         if (room.players.size === 0) {
           clearInterval(room.timer);
           rooms.delete(currentRoom);
         } else {
-          // Assign new host
           room.host = room.players.keys().next().value;
         }
       }
-
       io.to(currentRoom).emit("playerLeft", Array.from(room.players.values()));
     } else if (room.spectators.has(socket.id)) {
       room.spectators.delete(socket.id);
@@ -475,40 +454,24 @@ socket.on("quitRoom", () => {
   function endGame(room) {
     room.gameActive = false;
     clearInterval(room.timer);
-
-    const players = Array.from(room.players.values());
-
-    // Check if there are any players left
+    const players = Array.from(room.players.values()).map(p => ({
+      ...p,
+      comboLevel: room.playerCombos.get(p.id)?.level || 1
+    }));
+    room.playerCombos.clear();
     if (players.length === 0) {
-      // No players left, just clean up
       rooms.delete(room.code);
       return;
     }
-
     let winner = players[0];
-
-    // Find player with highest score
     for (let i = 1; i < players.length; i++) {
-      if (players[i].score > winner.score) {
-        winner = players[i];
-      }
+      if (players[i].score > winner.score) winner = players[i];
     }
-
-    // Check if we actually have a winner
-    if (winner) {
-      io.to(room.code).emit("gameOver", {
-        players,
-        winner: winner.nickname || "Anonymous",
-        score: winner.score,
-      });
-    } else {
-      // Fallback if no winner could be determined
-      io.to(room.code).emit("gameOver", {
-        players,
-        winner: "No winner",
-        score: 0,
-      });
-    }
+    io.to(room.code).emit("gameOver", {
+      players,
+      winner: winner.nickname || "Anonymous",
+      score: winner.score,
+    });
   }
 });
 

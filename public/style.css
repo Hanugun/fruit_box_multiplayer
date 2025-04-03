@@ -272,8 +272,9 @@ body.valorant-theme {
   background: #2A2E35;
   border-radius: 1rem;
   font-size: 0.9rem;
-  border: 1px solid #FF4655;
+  border: 1px solid;
   color: #ECE8E1;
+  position: relative;
 }
 
 .player-chip.you {
@@ -289,9 +290,20 @@ body.valorant-theme {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100px;
-  display: inline-block;
+}
+.player-chip .score {
+  margin-left: auto;
+  padding-left: 0.5rem;
 }
 
+/* .player-chip .combo-display {
+  font-weight: bold;
+  color: #FFD700;
+} */
+
+.player-chip .fire-icon {
+  margin-left: 0.2rem;
+}
 .medal {
   font-size: 1rem;
 }
@@ -778,4 +790,123 @@ input[type="range"] {
   font-size: 0.8rem;
   color: #888;
   margin-left: 0.3rem;
+}
+.combo-display {
+  position: absolute;
+  top: 0px;
+  right: 0%;
+  transform: translateX(-50%);
+  background: rgba(255, 70, 85, 0.8);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  opacity: 0;
+  transition: opacity 2s;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* .combo-display[data-combo="5"] {
+  animation: firePulse 1s infinite;
+} */
+
+/* @keyframes firePulse {
+  0% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.1); box-shadow: 0 0 10px #FF4500; }
+  100% { transform: translateX(-50%) scale(1); }
+} */
+
+/* Combo cue styling */
+.combo-cue {
+  position: absolute;
+  z-index: 20;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Fire animation for x5 combo
+.fire-animation {
+  position: absolute;
+  width: 20px;
+  height: 30px;
+  background: linear-gradient(to bottom, #ff4500, #ff8c00);
+  border-radius: 50% 50% 0 0;
+  transform: rotate(-45deg);
+  animation: fire 0.5s infinite alternate;
+  pointer-events: none;
+} */
+
+@keyframes fire {
+  0% { height: 30px; opacity: 0.8; }
+  100% { height: 40px; opacity: 0.5; }
+}
+.combo-reset-effect {
+  animation: comboResetPulse 0.3s ease-out;
+}
+
+@keyframes comboResetPulse {
+  0% { opacity: 0; transform: scaleY(0); }
+  50% { opacity: 0.5; transform: scaleY(1); }
+  100% { opacity: 0; transform: scaleY(1); }
+}
+
+.fire-container {
+  position: relative;
+  display: inline-block;
+  margin-left: 0.2rem;
+}
+
+/* Fire animation styles */
+.fire-icon {
+  width: 20px; /* Adjust size as needed */
+  height: 24px;
+  margin-left: 4px;
+  vertical-align: middle;
+  display: inline-block;
+  animation: fireFlicker 0.8s infinite alternate;
+  transform-origin: center bottom;
+  position: relative;
+  z-index: 1;
+}
+
+.fire-icon.x5 {
+  width: 24px;
+  height: 28px;
+  animation: intenseFireFlicker 0.6s infinite alternate;
+}
+
+@keyframes fireFlicker {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 5px #ff4500);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1) rotate(-5deg);
+    filter: drop-shadow(0 0 10px #ff8c00);
+  }
+}
+
+@keyframes intenseFireFlicker {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 8px #ff4500);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1.2) rotate(5deg);
+    filter: drop-shadow(0 0 15px #ff8c00);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(0.9) rotate(-5deg);
+    filter: drop-shadow(0 0 12px #ffd700);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1.1) rotate(3deg);
+    filter: drop-shadow(0 0 10px #ff4500);
+  }
 }

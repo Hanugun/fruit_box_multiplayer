@@ -1,44 +1,37 @@
 const socket = io();
 // Modify the forceGameState handler to properly handle player activation
+
 socket.on("forceGameState", (data) => {
   if (data.roomCode) {
     currentRoom = data.roomCode;
     updateRoomCodeDisplay();
   }
-  // Hide all modals
   Object.values(modals).forEach(modal => {
     modal.style.display = "none";
   });
-  
-  // Initialize game state
   grid = data.grid;
   players = data.players.reduce((acc, player) => {
-    acc[player.id] = player;
+    acc[player.id] = { ...player, comboLevel: data.playerCombos?.[player.id]?.level || 1 };
     return acc;
   }, {});
-  
-  // Set game active status based on both canPlay and isSpectator
   gameActive = data.canPlay || false;
-  
-  // Update UI
   document.getElementById("gameContainer").style.display = "block";
-  
   if (data.isSpectator) {
     document.getElementById("waitOverlay").style.display = "flex";
-    document.querySelector("#waitOverlay .wait-message").textContent = 
-      data.message || "You joined mid-game. Waiting for next round...";
+    document.querySelector("#waitOverlay .wait-message").textContent = data.message || "You joined mid-game. Waiting for next round...";
     canvas.classList.add("spectator");
   } else {
     document.getElementById("waitOverlay").style.display = "none";
     canvas.classList.remove("spectator");
   }
-  
-  // Initialize game view
   const container = document.getElementById('gameContainer');
   canvas.width = container.clientWidth - 20;
   canvas.height = container.clientHeight - 20;
   autoScaleGrid();
   updateScoreboard();
+  comboStartTime = null; // Reset combo timer on state force
+  currentComboLevel = players[socket.id]?.comboLevel || 1;
+  animateComboBar();
 });
 socket.on("lobbyNotification", (data) => {
   if (isHost) {
@@ -50,8 +43,6 @@ function showLobbyNotification(message) {
   const notification = document.createElement("div");
   notification.className = "lobby-notification";
   notification.textContent = message;
-  
-  // Basic inline styling for the notification
   notification.style.position = "fixed";
   notification.style.top = "10px";
   notification.style.left = "10px";
@@ -63,15 +54,10 @@ function showLobbyNotification(message) {
   notification.style.fontSize = "1rem";
   notification.style.opacity = "1";
   notification.style.transition = "opacity 0.5s ease";
-  
   document.body.appendChild(notification);
-  
-  // Remove after 3 seconds by fading out
   setTimeout(() => {
     notification.style.opacity = "0";
-    setTimeout(() => {
-      notification.remove();
-    }, 500);
+    setTimeout(() => notification.remove(), 500);
   }, 3000);
 }
 // Connection handling
@@ -187,9 +173,16 @@ let removingApples = [];
 let remoteCursors = {};
 let playerNames = {};
 let nextPlayerNumber = 1;
-
+let COMBO_DURATION = 3000;
 // Sound effects
-const popSound = new Audio("pop.mp3");
+const popSounds = {
+  1: new Audio("pop.mp3"),
+  2: new Audio("pop2.mp3"),
+  3: new Audio("pop3.mp3"),
+  4: new Audio("pop4.mp3"),
+  5: new Audio("pop5.mp3")
+};
+const buttonSound = new Audio("button.mp3");
 const bgmBoss = new Audio("boss.mp3");
 const bgmOIA = new Audio("oia.m4a");
 const bgmChill = new Audio("chill.m4a");
@@ -199,7 +192,11 @@ const availableColors = [
   "#FF00FF", "#FFFFFF", "#FFD700", "#00BFFF", "#8A2BE2"
 ];
 const playerColors = {};
-
+function playButtonSound() {
+  buttonSound.currentTime = 0;
+  buttonSound.volume = 0.2;
+  buttonSound.play().catch(e => console.log("Audio play prevented:", e));
+}
 // Modals
 const modals = {
   initial: document.getElementById("initialModal"),
@@ -208,13 +205,15 @@ const modals = {
   lobby: document.getElementById("lobbyModal"),
   gameOver: document.getElementById("gameOverModal"),
 };
-
+document.querySelectorAll('button').forEach(button => {
+  button.addEventListener('click', playButtonSound);
+});
 // Initialize sound
 bgmTracks.forEach((track) => {
   track.loop = true;
   track.volume = parseFloat(document.getElementById("bgmVolume").value);
 });
-
+popSounds[1].volume = parseFloat(document.getElementById("popVolume").value);
 // Event listeners
 document.getElementById("createRoomBtn").addEventListener("click", () => {
   modals.initial.style.display = "none";
@@ -249,7 +248,120 @@ document.getElementById("confirmJoinRoom").addEventListener("click", () => {
   socket.emit("joinRoom", { roomCode, nickname });
   modals.join.style.display = "none";
 });
+const comboBar = document.createElement("div");
+comboBar.id = "comboBarContainer";
+comboBar.style.position = "absolute";
+comboBar.style.left = "1rem";
+comboBar.style.top = "3.5rem";
+comboBar.style.width = "20px";
+comboBar.style.height = "calc(90% - 5rem)";
+// comboBar.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+// comboBar.style.border = "1px solid rgba(255, 255, 255, 0.3)";
+comboBar.style.borderRadius = "4px";
+comboBar.style.overflow = "hidden";
+comboBar.style.zIndex = 10;
+document.getElementById("gameContainer").appendChild(comboBar);
 
+const comboBarFill = document.createElement("div");
+comboBarFill.id = "comboBar";
+comboBarFill.style.position = "absolute";
+comboBarFill.style.bottom = "0";
+comboBarFill.style.left = "0";
+comboBarFill.style.width = "100%";
+comboBarFill.style.height = "100%";
+comboBarFill.style.backgroundColor = "#2ecc71";
+comboBarFill.style.transition = "height 0.2s linear, background-color 0.2s";
+comboBar.appendChild(comboBarFill);
+
+let comboStartTime = null;
+let currentComboLevel = 1;
+
+function playComboSound(comboLevel) {
+  const sound = popSounds[comboLevel] || popSounds[1];
+  sound.currentTime = 0;
+  sound.volume = parseFloat(document.getElementById("popVolume").value);
+  sound.play();
+  comboStartTime = Date.now();
+  currentComboLevel = comboLevel;
+  animateComboBar();
+}
+
+function animateComboBar() {
+  if (!comboStartTime || currentComboLevel === 1) {
+    comboBarFill.style.height = "0%";
+    comboBarFill.style.backgroundColor = "#2ecc71";
+    comboStartTime = null;
+    return;
+  }
+
+  const now = Date.now();
+  const elapsed = (now - comboStartTime) / COMBO_DURATION;
+  const heightPercent = Math.max(0, 1 - elapsed) * 80;
+
+  comboBarFill.style.height = `${heightPercent}%`;
+
+  if (elapsed < 0.33) {
+    comboBarFill.style.backgroundColor = "#2ecc71";
+  } else if (elapsed < 0.66) {
+    comboBarFill.style.backgroundColor = "#f39c12";
+  } else {
+    comboBarFill.style.backgroundColor = "#e74c3c";
+  }
+
+  if (elapsed < 1) {
+    requestAnimationFrame(animateComboBar);
+  } else {
+    comboBarFill.style.height = "0%";
+    comboBarFill.style.backgroundColor = "#2ecc71";
+    currentComboLevel = 1;
+    if (socket.id in players) players[socket.id].comboLevel = 1;
+    updateScoreboard();
+    comboStartTime = null;
+  }
+}
+function showComboVisualCue(row, col, comboLevel) {
+  const x = offsetX + col * cellSize + cellSize / 2;
+  const y = offsetY + row * cellSize - cellSize / 2; // Above selection
+  const cue = document.createElement("div");
+  cue.className = "combo-cue";
+  cue.textContent = `Combo x${comboLevel}`;
+  cue.style.position = "absolute";
+  cue.style.left = `${x}px`;
+  cue.style.top = `${y}px`;
+  cue.style.color = "#FF4655";
+  cue.style.fontFamily = "'Rajdhani', sans-serif";
+  cue.style.fontSize = "1.2rem";
+  cue.style.opacity = 1;
+  cue.style.pointerEvents = "none";
+  cue.style.transform = "translate(-50%, -100%)";
+  document.getElementById("gameContainer").appendChild(cue);
+  setTimeout(() => {
+    cue.style.transition = "opacity 1.5s";
+    cue.style.opacity = 0;
+    setTimeout(() => cue.remove(), 1500);
+  }, 10);
+  if (comboLevel === 5) {
+    const x = offsetX + col * cellSize + cellSize / 2;
+    const y = offsetY + row * cellSize - cellSize / 2;
+    
+    // Convert canvas coordinates to page coordinates
+    const rect = canvas.getBoundingClientRect();
+    const pageX = rect.left + x;
+    const pageY = rect.top + y;
+    
+    // Firework effect
+    confetti({
+      particleCount: 150,
+      angle: 90,
+      spread: 80,
+      origin: { 
+        x: pageX / window.innerWidth,
+        y: pageY / window.innerHeight
+      },
+      colors: ['#FF4655', '#FFD700', '#FF8C00']
+    });
+  }
+}
 socket.on("roomJoined", ({ roomCode, players }) => {
   currentRoom = roomCode;
   isHost = false;
@@ -376,30 +488,37 @@ socket.on("spectatorJoined", (gameState) => {
 socket.on("gameState", (data) => {
   grid = data.grid;
   players = data.players.reduce((acc, player) => {
-    acc[player.id] = player;
+    acc[player.id] = { ...player, comboLevel: data.playerCombos?.[player.id]?.level || 1 };
     return acc;
   }, {});
   autoScaleGrid();
   updateScoreboard();
+  // Sync combo bar with server data
+  if (socket.id in data.playerCombos) {
+    const comboData = data.playerCombos[socket.id];
+    currentComboLevel = comboData.level;
+    comboStartTime = comboData.lastSelection; // Sync with server's lastSelection
+    animateComboBar();
+  }
 });
-
 socket.on("selectionSuccess", (data) => {
-  const { removed, playerId, newScore } = data;
+  const { removed, playerId, newScore, comboLevel } = data;
   players[playerId].score = newScore;
   if (playerId === socket.id) {
     myScore = newScore;
     myScoreElem.textContent = `Your Score: ${myScore}`;
-    popSound.currentTime = 0;
-    popSound.play();
+    playComboSound(comboLevel);
+    showComboVisualCue(removed[0].row, removed[0].col, comboLevel);
+    currentComboLevel = comboLevel;
+    comboStartTime = Date.now(); // Initial local set, will be overridden by gameState
+    animateComboBar();
   }
-
   removed.forEach(({ row, col }) => {
     let oldValue = grid[row][col];
     if (oldValue < 1) oldValue = 1;
     let dir = Math.random() < 0.5 ? -1 : 1;
     let randomArcPeak = 100 + Math.random() * 100;
     let randomArcSide = 80 + Math.random() * 40;
-
     removingApples.push({
       row,
       col,
@@ -412,17 +531,39 @@ socket.on("selectionSuccess", (data) => {
     });
     grid[row][col] = 0;
   });
-
   updateScoreboard();
-  data.removed.forEach(({ row, col }) => {
-    // When apples are removed, we'll assume new ones appear
-    // In a real game, you'd need to track when new apples spawn
+  removed.forEach(({ row, col }) => {
     appleAppearTimes[row][col] = performance.now();
   });
 });
-
 socket.on("selectionFail", (data) => {
-  console.log("Selection failed:", data.reason);
+  const comboResetEffect = document.createElement("div");
+  comboResetEffect.className = "combo-reset-effect";
+  comboResetEffect.style.position = "absolute";
+  comboResetEffect.style.left = "1rem";
+  comboResetEffect.style.top = "5rem";
+  comboResetEffect.style.width = "20px";
+  comboResetEffect.style.height = "calc(90% - 5rem)";
+  comboResetEffect.style.backgroundColor = "rgba(255, 70, 85, 0.3)";
+  comboResetEffect.style.borderRadius = "4px";
+  comboResetEffect.style.zIndex = "5";
+  document.getElementById("gameContainer").appendChild(comboResetEffect);
+
+  setTimeout(() => {
+    comboResetEffect.style.transition = "opacity 0.5s";
+    comboResetEffect.style.opacity = "0";
+    setTimeout(() => comboResetEffect.remove(), 500);
+  }, 100);
+
+  comboStartTime = null;
+  currentComboLevel = 1;
+  comboBarFill.style.height = "0%";
+  comboBarFill.style.backgroundColor = "#2ecc71";
+
+  if (socket.id in players) {
+    players[socket.id].comboLevel = 1;
+  }
+  updateScoreboard();
 });
 let totalTimeFromServer = 120;
 let lastServerTimeLeft = totalTimeFromServer;
@@ -472,25 +613,21 @@ socket.on("gameOver", (data) => {
   resetSelection();
   const finalScoreElem = document.getElementById("finalScore");
   finalScoreElem.innerHTML = `Your Score: ${myScore}<br>Winner: ${data.winner} (${data.score})`;
-
   modals.gameOver.style.display = "flex";
   const gameOverModalContent = document.querySelector("#gameOverModal .modal-content");
-
-  // Remove any existing buttons first
   const existingPlayAgain = document.getElementById("playAgainBtn");
   if (existingPlayAgain) existingPlayAgain.remove();
   const existingPoke = document.getElementById("pokeBtn");
   if (existingPoke) existingPoke.remove();
   const existingQuit = document.getElementById("quitBtn");
   if (existingQuit) existingQuit.remove();
-
   if (isHost) {
-    // Host gets a "Play Again" button.
     const playAgainBtn = document.createElement("button");
     playAgainBtn.id = "playAgainBtn";
     playAgainBtn.textContent = "Play Again";
     playAgainBtn.className = "modal-btn";
     playAgainBtn.addEventListener("click", () => {
+      playButtonSound();
       socket.emit("startGame");
       myScore = 0;
       myScoreElem.textContent = `Your Score: 0`;
@@ -498,27 +635,28 @@ socket.on("gameOver", (data) => {
     });
     gameOverModalContent.appendChild(playAgainBtn);
   } else {
-    // Non-host players get a "Poke" button.
     const pokeBtn = document.createElement("button");
     pokeBtn.id = "pokeBtn";
     pokeBtn.textContent = "Poke";
     pokeBtn.className = "modal-btn";
     pokeBtn.addEventListener("click", () => {
+      playButtonSound();
       socket.emit("pokeHost");
     });
     gameOverModalContent.appendChild(pokeBtn);
   }
-
-  // In both cases, add a Quit button (with a smaller style)
   const quitBtn = document.createElement("button");
   quitBtn.id = "quitBtn";
   quitBtn.textContent = "Quit";
-  quitBtn.className = "modal-btn small-btn"; // add a new class for smaller styling
+  quitBtn.className = "modal-btn small-btn";
   quitBtn.addEventListener("click", () => {
+    playButtonSound();
     socket.emit("quitRoom");
     window.location.reload();
   });
   gameOverModalContent.appendChild(quitBtn);
+  players[socket.id].comboLevel = 1; // Reset combo on game over
+  updateScoreboard();
 });
 
 socket.on("hostDisconnected", () => {
@@ -639,29 +777,27 @@ document.getElementById("saveSettingsBtn").addEventListener("click", () => {
 });
 
 socket.on("gameReset", (data) => {
-  // Update players and scores
+  // Reset combo bar
+  comboStartTime = null;
+  currentComboLevel = 1;
+  comboBarFill.style.height = "0%";
+  comboBarFill.style.backgroundColor = "#2ecc71";
+  
+  // Rest of your existing reset code...
   players = data.players.reduce((acc, player) => {
     acc[player.id] = player;
     return acc;
   }, {});
 
-  // Reset local score
   if (players[socket.id]) {
     myScore = players[socket.id].score;
     myScoreElem.textContent = `Your Score: ${myScore}`;
   }
 
-  // Update grid if provided
   if (data.grid) {
     grid = data.grid;
   }
 
-  // Update timer if provided
-  if (data.timeLeft !== undefined) {
-    timeLeftElem.textContent = `Time Left: ${data.timeLeft}s`;
-  }
-
-  // Refresh the display
   updateScoreboard();
   autoScaleGrid();
 });
@@ -730,21 +866,44 @@ function updateScoreboard() {
 
   sortedPlayers.slice(0, 5).forEach((player, index) => {
     const color = getPlayerColor(player.id);
+    const combo = player.comboLevel || 1;
+    const hasCombo = combo > 1;
+
     html += `
-      <div class="player-chip ${player.id === socket.id ? "you" : ""}" style="border-color: ${color}">
+      <div class="player-chip ${player.id === socket.id ? "you" : ""}" 
+           style="border-color: ${color};"
+           data-player-id="${player.id}">
         <span class="medal">${index < 3 ? ["🥇", "🥈", "🥉"][index] : ""}</span>
         <span class="name" style="color: ${color}">${player.nickname}</span>
         <span class="score">${player.score}</span>
+        ${hasCombo ? `
+          <span class="fire-container">
+            ${combo > 1 ? `<span class="combo-display">x${combo}</span>` : ''}
+            <img src="fire.svg" alt="Fire" class="fire-icon ${combo === 5 ? 'x5' : ''}" />
+          </span>
+        ` : ''}
       </div>
     `;
   });
 
-  if (sortedPlayers.length > 5) {
-    html += `<div class="more-players">+${sortedPlayers.length - 5}</div>`;
-  }
-
+  if (sortedPlayers.length > 5) html += `<div class="more-players">+${sortedPlayers.length - 5}</div>`;
   html += `</div>`;
   scoreboardDiv.innerHTML = html;
+}
+
+
+function updateComboDisplays() {
+  document.querySelectorAll(".combo-display").forEach(display => {
+    display.style.opacity = 1;
+    setTimeout(() => {
+      display.style.transition = "opacity 2s";
+      display.style.opacity = 0;
+      setTimeout(() => display.remove(), 2000);
+    }, 10);
+    // if (combo === 5) {
+    //   display.classList.add("fire-animation");
+    // }
+  });
 }
 function getPlayerColor(playerId) {
   if (playerColors[playerId]) {
@@ -1306,6 +1465,11 @@ document.getElementById('backFromLobby').addEventListener('click', () => {
 // Reset button functionality
 document.getElementById("resetButton").addEventListener("click", () => {
   if (isHost) {
+        // Reset combo bar
+    comboStartTime = null;
+    currentComboLevel = 1;
+    comboBarFill.style.height = "0%";
+    comboBarFill.style.backgroundColor = "#2ecc71";
     // Reset all scores immediately
     Object.values(players).forEach(player => {
       player.score = 0;
